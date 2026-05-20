@@ -10,8 +10,12 @@ export async function buildApp() {
   const app = Fastify({ logger: { level: process.env.NODE_ENV === 'production' ? 'info' : 'debug' } })
 
   // ── Plugins ───────────────────────────────────────────────────────────────
+  const allowedOrigins = (process.env.FRONTEND_URL ?? 'http://localhost:3000').split(',').map(o => o.trim())
   await app.register(cors, {
-    origin: process.env.FRONTEND_URL ?? 'http://localhost:3000',
+    origin: (origin, cb) => {
+      if (!origin || allowedOrigins.some(o => origin.startsWith(o))) return cb(null, true)
+      cb(new Error('Not allowed by CORS'), false)
+    },
     credentials: true,
   })
 
