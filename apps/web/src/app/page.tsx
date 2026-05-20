@@ -1,0 +1,235 @@
+'use client'
+
+import { useState } from 'react'
+import { GraduationCap, Gem, Plus, Bell, ChevronDown } from 'lucide-react'
+import { Sidebar } from '@/components/layout/Sidebar'
+import { Header } from '@/components/layout/Header'
+import { MobileNav } from '@/components/layout/MobileNav'
+import { TradingChart } from '@/components/trading/TradingChart'
+import { TradingPanel } from '@/components/trading/TradingPanel'
+import { MobileTradingSheet } from '@/components/trading/MobileTradingSheet'
+import { AccountSwitchModal } from '@/components/layout/AccountSwitchModal'
+import { AssetInfoModal } from '@/components/trading/AssetInfoModal'
+import { AssetSelectorModal } from '@/components/trading/AssetSelectorModal'
+import { SupportPanel } from '@/components/layout/SupportPanel'
+import { SupportPage } from '@/components/support/SupportPage'
+import { ContaPage } from '@/components/conta/ContaPage'
+import { TorneiosPage } from '@/components/torneios/TorneiosPage'
+import { MercadoPage } from '@/components/mercado/MercadoPage'
+import { MaisPanel } from '@/components/layout/MaisPanel'
+import { ConfiguracoesPanel, type TradeSettings } from '@/components/layout/ConfiguracoesPanel'
+import { DepositoModal } from '@/components/deposito/DepositoModal'
+import { AccountDropdown } from '@/components/layout/AccountDropdown'
+import { ASSETS, type Asset } from '@/lib/mockData'
+import { cn } from '@/lib/utils'
+
+type SidebarTab = 'TRADE' | 'SUPORTE' | 'CONTA' | 'TORNEIOS' | 'MERCADO' | 'MAIS'
+
+export default function TradingPage() {
+  const [selectedAsset, setSelectedAsset] = useState<Asset>(ASSETS[3])
+  const [openAssets, setOpenAssets] = useState<Asset[]>([ASSETS[0], ASSETS[3]])
+  const [isDemo, setIsDemo] = useState(true)
+  const [demoBalance] = useState(45411.5)
+  const [realBalance] = useState(100701.7)
+  const [switchModal, setSwitchModal] = useState<'demo' | 'real' | null>(null)
+  const [assetInfoOpen, setAssetInfoOpen] = useState(false)
+  const [assetSelectorOpen, setAssetSelectorOpen] = useState(false)
+  const [depositoOpen, setDepositoOpen] = useState(false)
+  const [contaInitialTab, setContaInitialTab] = useState<'retirada' | 'minha-conta'>('minha-conta')
+  const [configOpen, setConfigOpen] = useState(false)
+  const [theme, setTheme] = useState<'diurno' | 'crepusculo' | 'noite'>('noite')
+  const [tradeSettings, setTradeSettings] = useState<TradeSettings>({
+    autoScroll: true,
+    oneClickTrade: true,
+    performanceMode: true,
+    shortLabels: true,
+  })
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('TRADE')
+  const [mobileAccountOpen, setMobileAccountOpen] = useState(false)
+
+  const balance = isDemo ? demoBalance : realBalance
+
+  function handleSelectAsset(asset: Asset) {
+    setSelectedAsset(asset)
+    if (!openAssets.find((a) => a.id === asset.id)) {
+      setOpenAssets((prev) => [...prev, asset])
+    }
+  }
+
+  function handleCloseAsset(asset: Asset) {
+    const remaining = openAssets.filter((a) => a.id !== asset.id)
+    setOpenAssets(remaining)
+    if (selectedAsset.id === asset.id && remaining.length > 0) {
+      setSelectedAsset(remaining[remaining.length - 1])
+    }
+  }
+
+  function handleSelectDemo() {
+    if (!isDemo) { setIsDemo(true); setSwitchModal('demo') }
+  }
+
+  function handleSelectReal() {
+    if (isDemo) { setIsDemo(false); setSwitchModal('real') }
+  }
+
+  // ─── Shared content renderers ──────────────────────────────────────────────
+
+  function renderMainContent(isMobile = false) {
+    if (sidebarTab === 'SUPORTE') return (
+      <div className={cn('flex flex-1 min-h-0 overflow-hidden', isMobile && 'flex-col')}>
+        {!isMobile && <SupportPanel onClose={() => setSidebarTab('TRADE')} />}
+        <SupportPage />
+      </div>
+    )
+    if (sidebarTab === 'CONTA')    return <ContaPage key={contaInitialTab} initialTab={contaInitialTab} />
+    if (sidebarTab === 'TORNEIOS') return <TorneiosPage />
+    if (sidebarTab === 'MERCADO')  return <MercadoPage />
+    if (sidebarTab === 'MAIS')     return (
+      <div className="flex flex-1 min-h-0 overflow-hidden">
+        {!isMobile && <MaisPanel onClose={() => setSidebarTab('TRADE')} />}
+        <TradingChart asset={selectedAsset} onInfoClick={() => setAssetInfoOpen(true)} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} />
+        {!isMobile && <TradingPanel asset={selectedAsset} oneClickTrade={tradeSettings.oneClickTrade} shortLabels={tradeSettings.shortLabels} />}
+      </div>
+    )
+    // TRADE (default)
+    return (
+      <div className="flex flex-1 min-h-0 overflow-hidden">
+        {!isMobile && configOpen && (
+          <ConfiguracoesPanel onClose={() => setConfigOpen(false)} theme={theme} onThemeChange={setTheme} settings={tradeSettings} onSettingsChange={setTradeSettings} />
+        )}
+        {!isMobile && assetSelectorOpen && (
+          <AssetSelectorModal selectedAsset={selectedAsset} onSelect={handleSelectAsset} onClose={() => setAssetSelectorOpen(false)} />
+        )}
+        <TradingChart asset={selectedAsset} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} />
+        {!isMobile && <TradingPanel asset={selectedAsset} oneClickTrade={tradeSettings.oneClickTrade} shortLabels={tradeSettings.shortLabels} />}
+      </div>
+    )
+  }
+
+  return (
+    <div className="h-full bg-[#151822] overflow-hidden">
+
+      {/* ── DESKTOP layout (md+) ─────────────────────────────────────────── */}
+      <div className="hidden md:flex h-full overflow-hidden">
+        <Sidebar activeTab={sidebarTab} onTabChange={setSidebarTab} onSettings={() => setConfigOpen(!configOpen)} />
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+          <Header
+            selectedAsset={selectedAsset}
+            onSelectAsset={handleSelectAsset}
+            openAssets={openAssets}
+            onOpenAsset={handleSelectAsset}
+            onCloseAsset={handleCloseAsset}
+            onOpenSelector={() => setAssetSelectorOpen(true)}
+            onDeposito={() => setDepositoOpen(true)}
+            onRetirada={() => { setContaInitialTab('retirada'); setSidebarTab('CONTA') }}
+            isDemo={isDemo}
+            onSelectDemo={handleSelectDemo}
+            onSelectReal={handleSelectReal}
+            demoBalance={demoBalance}
+            realBalance={realBalance}
+            balance={balance}
+          />
+          <div className="flex-1 flex min-h-0 overflow-hidden relative">
+            {renderMainContent(false)}
+          </div>
+        </div>
+      </div>
+
+      {/* ── MOBILE layout (< md) ─────────────────────────────────────────── */}
+      <div className="flex md:hidden h-full flex-col overflow-hidden">
+
+        {/* Mobile header */}
+        <header className="flex items-center justify-between px-4 h-12 bg-[#1d2130] border-b border-[#2a2e3b] flex-shrink-0">
+          {/* Logo */}
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 bg-white rounded flex items-center justify-center">
+              <span className="text-[#1d2130] text-xs font-black">V</span>
+            </div>
+            <span className="text-white font-bold text-sm tracking-widest">VERTEX</span>
+          </div>
+
+          {/* Right: balance + deposit */}
+          <div className="flex items-center gap-2">
+            {/* Notifications */}
+            <button className="relative w-8 h-8 flex items-center justify-center text-[#8b8f9a]">
+              <Bell size={16} />
+              <span className="absolute top-0.5 right-0.5 min-w-[13px] h-[13px] px-[2px] flex items-center justify-center bg-red-500 text-white text-[8px] font-bold rounded-full leading-none">7</span>
+            </button>
+
+            {/* Balance chip */}
+            <div className="relative">
+              <button
+                onClick={() => setMobileAccountOpen(v => !v)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#252a3a] border border-[#2a2e3b]"
+              >
+                {isDemo
+                  ? <GraduationCap size={14} className="text-yellow-400 flex-shrink-0" />
+                  : <Gem size={14} className="text-purple-400 flex-shrink-0" />
+                }
+                <div className="text-left">
+                  <div className={cn('text-[8px] font-bold leading-tight', isDemo ? 'text-yellow-400' : 'text-green-400')}>
+                    {isDemo ? 'DEMO' : 'REAL'}
+                  </div>
+                  <div className="text-xs font-bold text-white leading-tight">
+                    R${balance.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                  </div>
+                </div>
+                <ChevronDown size={10} className={cn('text-[#8b8f9a] transition-transform', mobileAccountOpen && 'rotate-180')} />
+              </button>
+
+              {mobileAccountOpen && (
+                <div className="absolute top-full right-0 mt-1 z-50">
+                  <AccountDropdown
+                    isDemo={isDemo}
+                    onSelectDemo={() => { handleSelectDemo(); setMobileAccountOpen(false) }}
+                    onSelectReal={() => { handleSelectReal(); setMobileAccountOpen(false) }}
+                    demoBalance={demoBalance}
+                    realBalance={realBalance}
+                    onClose={() => setMobileAccountOpen(false)}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Deposit */}
+            <button
+              onClick={() => setDepositoOpen(true)}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-green-500 hover:bg-green-400 text-xs font-bold text-white transition-colors"
+            >
+              <Plus size={12} />
+              Depósito
+            </button>
+          </div>
+        </header>
+
+        {/* Main content area */}
+        <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+          {renderMainContent(true)}
+        </div>
+
+        {/* Mobile trading sheet (only on TRADE tab) */}
+        {sidebarTab === 'TRADE' && (
+          <MobileTradingSheet
+            asset={selectedAsset}
+            oneClickTrade={tradeSettings.oneClickTrade}
+            shortLabels={tradeSettings.shortLabels}
+          />
+        )}
+
+        {/* Mobile bottom navigation */}
+        <MobileNav activeTab={sidebarTab} onTabChange={setSidebarTab} />
+      </div>
+
+      {/* ── Global modals (shared desktop + mobile) ──────────────────────── */}
+      {assetInfoOpen && (
+        <AssetInfoModal asset={selectedAsset} onClose={() => setAssetInfoOpen(false)} onTrade={() => setAssetInfoOpen(false)} />
+      )}
+      {depositoOpen && (
+        <DepositoModal onClose={() => setDepositoOpen(false)} />
+      )}
+      {switchModal && (
+        <AccountSwitchModal switchedTo={switchModal} demoBalance={demoBalance} realBalance={realBalance} onClose={() => setSwitchModal(null)} />
+      )}
+    </div>
+  )
+}
