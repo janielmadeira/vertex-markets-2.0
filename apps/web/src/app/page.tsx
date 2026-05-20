@@ -56,8 +56,11 @@ export default function TradingPage() {
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('TRADE')
   const [mobileAccountOpen, setMobileAccountOpen] = useState(false)
 
-  const isDemo  = authStore.isDemo
-  const balance = currentAccount ? parseFloat(currentAccount.balance) : 0
+  const isDemo      = authStore.isDemo
+  const accounts    = authStore.user?.accounts ?? []
+  const demoBalance = parseFloat(accounts.find(a => a.type === 'DEMO')?.balance ?? '0')
+  const realBalance = parseFloat(accounts.find(a => a.type === 'REAL')?.balance ?? '0')
+  const balance     = isDemo ? demoBalance : realBalance
 
   function handleSelectAsset(asset: Asset) {
     setSelectedAsset(asset)
