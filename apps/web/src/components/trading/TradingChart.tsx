@@ -320,57 +320,82 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
         setCandleTime(`${h}:${m}:${s}`)
       })
 
-      const now = Math.floor(Date.now() / 1000)
-
-      // Trade open/close dashed lines
-      const openLine = chart.addSeries(LineSeries, {
-        color: 'rgba(255,255,255,0.25)', lineWidth: 1, lineStyle: LineStyle.Dashed,
-        priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
-      })
-      openLine.setData([
-        { time: now - selectedTf.seconds - 1, value: asset.price * 0.9985 },
-        { time: now - selectedTf.seconds,     value: asset.price * 1.0015 },
-      ])
-
-      const closeLine = chart.addSeries(LineSeries, {
-        color: 'rgba(255,255,255,0.25)', lineWidth: 1, lineStyle: LineStyle.Dashed,
-        priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
-      })
-      closeLine.setData([
-        { time: now + selectedTf.seconds - 2, value: asset.price * 0.9985 },
-        { time: now + selectedTf.seconds,     value: asset.price * 1.0015 },
-      ])
-
       chart.timeScale().fitContent()
-      chart.timeScale().scrollToPosition(5, false)
+      chart.timeScale().scrollToRealTime()
 
-      let lastCandle = { ...candles[candles.length - 1] }
-      let entryPrice = lastCandle.close
+      // ── OTC Live Engine ───────────────────────────────────────────────────
+      const decimals = asset.price > 10 ? 3 : 5
+      const fmt5 = (v: number) => parseFloat(v.toFixed(decimals))
+      const tfSec = selectedTf.seconds
+
+      // Align candle start to timeframe boundary
+      const nowSec = () => Math.floor(Date.now() / 1000)
+      const alignedStart = (t: number) => Math.floor(t / tfSec) * tfSec
+
+      let price        = candles[candles.length - 1].close
+      let candleStart  = alignedStart(nowSec())
+      let candleOpen   = price
+      let candleHigh   = price
+      let candleLow    = price
+      let entryPrice   = price
+
+      // Trend engine: slow-changing bias + mean reversion
+      let trend        = (Math.random() - 0.5) * 0.4
+      let trendAge     = 0
+      const trendLife  = () => 15 + Math.floor(Math.random() * 35)
+      let nextTrendFlip = trendLife()
 
       priceInterval = setInterval(() => {
-        const change = (Math.random() - 0.48) * (asset.price * 0.0002)
-        const newPrice = parseFloat((lastCandle.close + change).toFixed(asset.price > 10 ? 3 : 5))
-        const newHigh = Math.max(lastCandle.high, newPrice)
-        const newLow  = Math.min(lastCandle.low,  newPrice)
+        // Evolve trend
+        trendAge++
+        if (trendAge >= nextTrendFlip) {
+          trend = (Math.random() - 0.5) * 0.5
+          trendAge = 0
+          nextTrendFlip = trendLife()
+        }
 
-        lastCandle = { ...lastCandle, close: newPrice, high: newHigh, low: newLow }
+        // Mean reversion toward asset base price
+        const reversion = (asset.price - price) * 0.0008
+
+        // Tick size proportional to asset price
+        const vol    = asset.price * 0.00012
+        const noise  = (Math.random() - 0.5) * vol * 2.2
+        const tick   = trend * vol + reversion + noise
+
+        price = fmt5(price + tick)
+        if (price <= 0) price = fmt5(asset.price * 0.95)
+
+        candleHigh = Math.max(candleHigh, price)
+        candleLow  = Math.min(candleLow,  price)
+
+        const now = nowSec()
+
+        // Advance candle when period ends
+        if (now >= candleStart + tfSec) {
+          candleStart  = alignedStart(now)
+          candleOpen   = price
+          candleHigh   = price
+          candleLow    = price
+        }
+
+        const candle = { time: candleStart, open: candleOpen, high: candleHigh, low: candleLow, close: price }
 
         if (chartType === 'area') {
-          mainSeries.update({ time: lastCandle.time, value: newPrice })
+          mainSeries.update({ time: candleStart, value: price })
         } else if (chartType === 'heiken-ashi') {
-          const haClose = parseFloat(((lastCandle.open + newHigh + newLow + newPrice) / 4).toFixed(5))
-          mainSeries.update({ ...lastCandle, close: haClose })
+          const haClose = fmt5((candleOpen + candleHigh + candleLow + price) / 4)
+          mainSeries.update({ ...candle, close: haClose })
         } else {
-          mainSeries.update(lastCandle)
+          mainSeries.update(candle)
         }
 
         if (autoScrollRef.current && chartRef.current) {
           chartRef.current.timeScale().scrollToRealTime()
         }
 
-        setCurrentPrice(newPrice)
-        setPriceChange(parseFloat((newPrice - entryPrice).toFixed(5)))
-      }, 800)
+        setCurrentPrice(price)
+        setPriceChange(fmt5(price - entryPrice))
+      }, 200)
     }
 
     initChart()

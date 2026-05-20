@@ -102,17 +102,45 @@ export interface Candle {
 
 export function generateMockCandles(basePrice = 158.92, count = 120, interval = 60): Candle[] {
   const candles: Candle[] = []
-  let price = basePrice
   const now = Math.floor(Date.now() / 1000)
+  // Align to candle boundary so live candle continues seamlessly
+  const alignedNow = Math.floor(now / interval) * interval
+
+  let price = basePrice * (1 + (Math.random() - 0.5) * 0.02) // slight start variance
+  let trend = (Math.random() - 0.5) * 0.3
+  let trendAge = 0
+  const vol = basePrice * 0.0008 // volatility relative to price
 
   for (let i = count; i >= 1; i--) {
+    // Evolve trend
+    trendAge++
+    if (trendAge > 8 + Math.floor(Math.random() * 12)) {
+      trend = (Math.random() - 0.5) * 0.4
+      trendAge = 0
+    }
+    // Mean reversion nudge
+    trend += (basePrice - price) / basePrice * 0.15
+
     const open = price
-    const change = (Math.random() - 0.48) * 0.12
-    const close = parseFloat((open + change).toFixed(3))
-    const high = parseFloat((Math.max(open, close) + Math.random() * 0.04).toFixed(3))
-    const low = parseFloat((Math.min(open, close) - Math.random() * 0.04).toFixed(3))
-    price = close
-    candles.push({ time: now - i * interval, open, high, low, close })
+    // Simulate ticks inside candle
+    let lo = open, hi = open
+    for (let t = 0; t < 8; t++) {
+      price += trend * vol + (Math.random() - 0.5) * vol * 1.5
+      if (price < lo) lo = price
+      if (price > hi) hi = price
+    }
+    const close = price
+    const wicks = vol * (0.3 + Math.random() * 0.5)
+    const high = parseFloat((hi + wicks).toFixed(5))
+    const low  = parseFloat((lo  - wicks).toFixed(5))
+
+    candles.push({
+      time: alignedNow - i * interval,
+      open: parseFloat(open.toFixed(5)),
+      high,
+      low,
+      close: parseFloat(close.toFixed(5)),
+    })
   }
 
   return candles
