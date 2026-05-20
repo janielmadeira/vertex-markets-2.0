@@ -3,6 +3,8 @@ import cors from '@fastify/cors'
 import jwt from '@fastify/jwt'
 import cookie from '@fastify/cookie'
 import { authRoutes } from './auth/routes.js'
+import { operationRoutes } from './operations/routes.js'
+import { accountRoutes } from './accounts/routes.js'
 
 export async function buildApp() {
   const app = Fastify({ logger: { level: process.env.NODE_ENV === 'production' ? 'info' : 'debug' } })
@@ -32,7 +34,9 @@ export async function buildApp() {
   app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))
 
   // ── Routes ────────────────────────────────────────────────────────────────
-  await app.register(authRoutes, { prefix: '/auth' })
+  await app.register(authRoutes,      { prefix: '/auth' })
+  await app.register(operationRoutes, { prefix: '/operations' })
+  await app.register(accountRoutes,   { prefix: '/accounts' })
 
   return app
 }

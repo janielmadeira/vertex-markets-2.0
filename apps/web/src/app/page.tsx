@@ -1,6 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { useAuthStore, useCurrentAccount } from '@/store/auth'
 import { GraduationCap, Gem, Plus, Bell, ChevronDown } from 'lucide-react'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { Header } from '@/components/layout/Header'
@@ -26,11 +28,18 @@ import { cn } from '@/lib/utils'
 type SidebarTab = 'TRADE' | 'SUPORTE' | 'CONTA' | 'TORNEIOS' | 'MERCADO' | 'MAIS'
 
 export default function TradingPage() {
+  const router        = useRouter()
+  const authStore     = useAuthStore()
+  const currentAccount = useCurrentAccount(authStore)
+
+  useEffect(() => {
+    authStore.init().then(() => {
+      if (!useAuthStore.getState().user) router.replace('/login')
+    })
+  }, [])
+
   const [selectedAsset, setSelectedAsset] = useState<Asset>(ASSETS[3])
   const [openAssets, setOpenAssets] = useState<Asset[]>([ASSETS[0], ASSETS[3]])
-  const [isDemo, setIsDemo] = useState(true)
-  const [demoBalance] = useState(45411.5)
-  const [realBalance] = useState(100701.7)
   const [switchModal, setSwitchModal] = useState<'demo' | 'real' | null>(null)
   const [assetInfoOpen, setAssetInfoOpen] = useState(false)
   const [assetSelectorOpen, setAssetSelectorOpen] = useState(false)
@@ -47,7 +56,8 @@ export default function TradingPage() {
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('TRADE')
   const [mobileAccountOpen, setMobileAccountOpen] = useState(false)
 
-  const balance = isDemo ? demoBalance : realBalance
+  const isDemo  = authStore.isDemo
+  const balance = currentAccount ? parseFloat(currentAccount.balance) : 0
 
   function handleSelectAsset(asset: Asset) {
     setSelectedAsset(asset)
@@ -65,11 +75,11 @@ export default function TradingPage() {
   }
 
   function handleSelectDemo() {
-    if (!isDemo) { setIsDemo(true); setSwitchModal('demo') }
+    if (!isDemo) { authStore.setIsDemo(true); setSwitchModal('demo') }
   }
 
   function handleSelectReal() {
-    if (isDemo) { setIsDemo(false); setSwitchModal('real') }
+    if (isDemo) { authStore.setIsDemo(false); setSwitchModal('real') }
   }
 
   // ─── Shared content renderers ──────────────────────────────────────────────
@@ -88,7 +98,7 @@ export default function TradingPage() {
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {!isMobile && <MaisPanel onClose={() => setSidebarTab('TRADE')} />}
         <TradingChart asset={selectedAsset} onInfoClick={() => setAssetInfoOpen(true)} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} />
-        {!isMobile && <TradingPanel asset={selectedAsset} oneClickTrade={tradeSettings.oneClickTrade} shortLabels={tradeSettings.shortLabels} />}
+        {!isMobile && <TradingPanel asset={selectedAsset} oneClickTrade={tradeSettings.oneClickTrade} shortLabels={tradeSettings.shortLabels} accountId={currentAccount?.id} onTradePlaced={() => authStore.refreshAccounts()} />}
       </div>
     )
     // TRADE (default)
@@ -101,7 +111,7 @@ export default function TradingPage() {
           <AssetSelectorModal selectedAsset={selectedAsset} onSelect={handleSelectAsset} onClose={() => setAssetSelectorOpen(false)} />
         )}
         <TradingChart asset={selectedAsset} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} />
-        {!isMobile && <TradingPanel asset={selectedAsset} oneClickTrade={tradeSettings.oneClickTrade} shortLabels={tradeSettings.shortLabels} />}
+        {!isMobile && <TradingPanel asset={selectedAsset} oneClickTrade={tradeSettings.oneClickTrade} shortLabels={tradeSettings.shortLabels} accountId={currentAccount?.id} onTradePlaced={() => authStore.refreshAccounts()} />}
       </div>
     )
   }

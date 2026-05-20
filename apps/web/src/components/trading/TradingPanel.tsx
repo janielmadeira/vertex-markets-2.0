@@ -5,12 +5,15 @@ import { Minus, Plus, ArrowUp, ArrowDown, RefreshCw, ChevronDown, ChevronUp, Arr
 import { type Asset, type OpenTrade, MOCK_OPEN_TRADES } from '@/lib/mockData'
 import { cn } from '@/lib/utils'
 import { FlagPair } from '@/components/ui/FlagPair'
+import { api } from '@/lib/api'
 
 interface TradingPanelProps {
   asset: Asset
   oneClickTrade?: boolean
   shortLabels?: boolean
   mobile?: boolean
+  accountId?: string
+  onTradePlaced?: () => void
 }
 
 const TIME_OPTIONS = [30, 60, 120, 180, 300, 600, 900, 1800, 3600]
@@ -86,16 +89,44 @@ function TradeItem({ trade, shortLabels }: { trade: OpenTrade; shortLabels: bool
   )
 }
 
-export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, mobile = false }: TradingPanelProps) {
+export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, mobile = false, accountId, onTradePlaced }: TradingPanelProps) {
   const [investment, setInvestment] = useState(15000)
   const [timeIndex, setTimeIndex] = useState(6) // 900s = 15:00
   const [pendingEnabled, setPendingEnabled] = useState(false)
   const [openTrades] = useState<OpenTrade[]>(MOCK_OPEN_TRADES)
   const [confirmTrade, setConfirmTrade] = useState<'CALL' | 'PUT' | null>(null)
   const [activeTab, setActiveTab] = useState<'operacoes' | 'pedidos'>('pedidos')
+  const [placing, setPlacing] = useState(false)
+  const [tradeError, setTradeError] = useState('')
 
   const payout  = asset.payout / 100
   const payment = Math.round(investment + investment * payout)
+
+  async function placeTrade(direction: 'CALL' | 'PUT') {
+    if (!accountId) return
+    setTradeError('')
+    setPlacing(true)
+    try {
+      await api.post('/operations', {
+        accountId,
+        assetId:          asset.id,
+        assetSymbol:      asset.label,
+        direction,
+        amount:           investment,
+        payout:           asset.payout,
+        entryPrice:       asset.price,
+        expiresInSeconds: TIME_OPTIONS[timeIndex],
+      })
+      onTradePlaced?.()
+      setConfirmTrade(null)
+    } catch (err: any) {
+      const code = err.response?.data?.error
+      if (code === 'INSUFFICIENT_BALANCE') setTradeError('Saldo insuficiente.')
+      else setTradeError('Erro ao abrir operação.')
+    } finally {
+      setPlacing(false)
+    }
+  }
 
   const totalSeconds = TIME_OPTIONS[timeIndex]
   const mm = Math.floor(totalSeconds / 60).toString().padStart(2, '0')
@@ -211,21 +242,23 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
                 Cancelar
               </button>
               <button
-                onClick={() => setConfirmTrade(null)}
+                onClick={() => confirmTrade && placeTrade(confirmTrade)}
+                disabled={placing}
                 className={cn(
-                  'flex-1 h-10 rounded-xl font-bold text-white text-sm transition-all active:scale-[0.98]',
+                  'flex-1 h-10 rounded-xl font-bold text-white text-sm transition-all active:scale-[0.98] disabled:opacity-50',
                   confirmTrade === 'CALL' ? 'bg-green-500 hover:bg-green-400' : 'bg-red-500 hover:bg-red-400'
                 )}
               >
-                Confirmar
+                {placing ? '...' : 'Confirmar'}
               </button>
             </div>
           </div>
         ) : (
           <>
             <button
-              onClick={() => !oneClickTrade && setConfirmTrade('CALL')}
-              className="w-full h-12 rounded-xl bg-green-500 hover:bg-green-400 active:scale-[0.98] transition-all flex items-center justify-between px-5 font-bold text-white text-base shadow-lg shadow-green-900/30"
+              onClick={() => oneClickTrade ? placeTrade('CALL') : setConfirmTrade('CALL')}
+              disabled={placing}
+              className="w-full h-12 rounded-xl bg-green-500 hover:bg-green-400 active:scale-[0.98] transition-all flex items-center justify-between px-5 font-bold text-white text-base shadow-lg shadow-green-900/30 disabled:opacity-50"
             >
               <span>Para cima</span>
               <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0">
@@ -233,14 +266,16 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
               </div>
             </button>
             <button
-              onClick={() => !oneClickTrade && setConfirmTrade('PUT')}
-              className="w-full h-12 rounded-xl bg-red-500 hover:bg-red-400 active:scale-[0.98] transition-all flex items-center justify-between px-5 font-bold text-white text-base shadow-lg shadow-red-900/30"
+              onClick={() => oneClickTrade ? placeTrade('PUT') : setConfirmTrade('PUT')}
+              disabled={placing}
+              className="w-full h-12 rounded-xl bg-red-500 hover:bg-red-400 active:scale-[0.98] transition-all flex items-center justify-between px-5 font-bold text-white text-base shadow-lg shadow-red-900/30 disabled:opacity-50"
             >
               <span>Para baixo</span>
               <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0">
                 <ArrowDown size={16} strokeWidth={2.5} />
               </div>
             </button>
+            {tradeError && <p className="text-red-400 text-xs text-center">{tradeError}</p>}
           </>
         )}
       </div>
