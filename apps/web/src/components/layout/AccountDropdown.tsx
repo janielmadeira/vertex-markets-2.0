@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
-import { Eye, RefreshCw, Pencil, LogOut, ArrowRightLeft, Clock, BarChart2, User, Gem } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Eye, RefreshCw, Pencil, LogOut, ArrowRightLeft, BarChart2, User, Gem, PiggyBank, Wallet } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface AccountDropdownProps {
@@ -10,15 +10,30 @@ interface AccountDropdownProps {
   onSelectReal: () => void
   demoBalance: number
   realBalance: number
+  userEmail: string
+  userId: string
   onClose: () => void
+  onLogout: () => void
+  onResetDemo: () => void
+  onDeposito: () => void
+  onRetirada: () => void
+  onTransacoes: () => void
+  onOperacoes: () => void
+  onMinhaConta: () => void
 }
 
-const menuItems = [
-  { label: 'Depósito', href: '#' },
-  { label: 'Retirada', href: '#' },
-  { label: 'Transações', href: '#', icon: <ArrowRightLeft size={14} /> },
-  { label: 'Operações', href: '#', icon: <BarChart2 size={14} /> },
-  { label: 'Minha Conta', href: '#', icon: <User size={14} /> },
+const menuItems = (actions: {
+  onDeposito: () => void
+  onRetirada: () => void
+  onTransacoes: () => void
+  onOperacoes: () => void
+  onMinhaConta: () => void
+}) => [
+  { label: 'Depósito',    icon: <PiggyBank size={14} />,      action: actions.onDeposito },
+  { label: 'Retirada',    icon: <Wallet size={14} />,         action: actions.onRetirada },
+  { label: 'Transações',  icon: <ArrowRightLeft size={14} />, action: actions.onTransacoes },
+  { label: 'Operações',   icon: <BarChart2 size={14} />,      action: actions.onOperacoes },
+  { label: 'Minha Conta', icon: <User size={14} />,           action: actions.onMinhaConta },
 ]
 
 export function AccountDropdown({
@@ -27,11 +42,20 @@ export function AccountDropdown({
   onSelectReal,
   demoBalance,
   realBalance,
+  userEmail,
+  userId,
   onClose,
+  onLogout,
+  onResetDemo,
+  onDeposito,
+  onRetirada,
+  onTransacoes,
+  onOperacoes,
+  onMinhaConta,
 }: AccountDropdownProps) {
   const ref = useRef<HTMLDivElement>(null)
+  const [resetting, setResetting] = useState(false)
 
-  // Close on outside click
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) {
@@ -41,6 +65,16 @@ export function AccountDropdown({
     setTimeout(() => document.addEventListener('mousedown', handleClick), 0)
     return () => document.removeEventListener('mousedown', handleClick)
   }, [onClose])
+
+  async function handleResetDemo(e: React.MouseEvent) {
+    e.stopPropagation()
+    setResetting(true)
+    try { await onResetDemo() } finally { setResetting(false) }
+  }
+
+  const shortId = userId ? userId.slice(0, 8).toUpperCase() : '--------'
+
+  const items = menuItems({ onDeposito, onRetirada, onTransacoes, onOperacoes, onMinhaConta })
 
   return (
     <div
@@ -64,8 +98,8 @@ export function AccountDropdown({
 
         {/* User info */}
         <div>
-          <div className="text-sm text-white font-medium">usuario@vertexmarkets.com</div>
-          <div className="text-xs text-[#8b8f9a] mt-0.5">ID: 00000001</div>
+          <div className="text-sm text-white font-medium truncate">{userEmail || 'usuario@vertexmarkets.com'}</div>
+          <div className="text-xs text-[#8b8f9a] mt-0.5">ID: {shortId}</div>
           <div className="flex items-center gap-2 mt-1.5">
             <span className="text-xs text-[#8b8f9a]">Moeda: BRL</span>
             <button className="text-[10px] font-bold text-blue-400 border border-blue-500/40 bg-blue-500/10 px-2 py-0.5 rounded hover:bg-blue-500/20 transition-colors">
@@ -81,13 +115,10 @@ export function AccountDropdown({
           onClick={onSelectReal}
           className={cn(
             'w-full text-left rounded-lg p-3 transition-colors border',
-            !isDemo
-              ? 'border-blue-500/40 bg-blue-500/5'
-              : 'border-transparent hover:bg-white/5'
+            !isDemo ? 'border-blue-500/40 bg-blue-500/5' : 'border-transparent hover:bg-white/5'
           )}
         >
           <div className="flex items-center gap-2.5">
-            {/* Radio */}
             <span className={cn(
               'w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center',
               !isDemo ? 'border-blue-500' : 'border-[#4a4f5e]'
@@ -112,13 +143,10 @@ export function AccountDropdown({
           onClick={onSelectDemo}
           className={cn(
             'w-full text-left rounded-lg p-3 transition-colors border',
-            isDemo
-              ? 'border-blue-500/40 bg-blue-500/5'
-              : 'border-transparent hover:bg-white/5'
+            isDemo ? 'border-blue-500/40 bg-blue-500/5' : 'border-transparent hover:bg-white/5'
           )}
         >
           <div className="flex items-center gap-2.5">
-            {/* Radio */}
             <span className={cn(
               'w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-colors',
               isDemo ? 'border-blue-500 bg-blue-500' : 'border-[#4a4f5e]'
@@ -144,10 +172,12 @@ export function AccountDropdown({
                   R${demoBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                 </span>
                 <button
-                  onClick={(e) => e.stopPropagation()}
-                  className="text-[#8b8f9a] hover:text-white transition-colors"
+                  onClick={handleResetDemo}
+                  disabled={resetting}
+                  className="text-[#8b8f9a] hover:text-white transition-colors disabled:opacity-50"
+                  title="Recarregar saldo demo"
                 >
-                  <RefreshCw size={12} />
+                  <RefreshCw size={12} className={resetting ? 'animate-spin' : ''} />
                 </button>
               </div>
             </div>
@@ -157,19 +187,23 @@ export function AccountDropdown({
 
       {/* Right panel — navigation */}
       <div className="bg-[#141720] w-[180px] flex-shrink-0 flex flex-col py-2">
-        {menuItems.map((item) => (
-          <a
+        {items.map((item) => (
+          <button
             key={item.label}
-            href={item.href}
-            className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-white hover:bg-white/5 transition-colors"
+            onClick={() => { item.action(); onClose() }}
+            className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-white hover:bg-white/5 transition-colors w-full text-left"
           >
+            <span className="text-[#8b8f9a]">{item.icon}</span>
             {item.label}
-          </a>
+          </button>
         ))}
 
         <div className="h-px bg-[#2a2e3b] mx-4 my-2" />
 
-        <button className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-red-400 hover:bg-red-500/10 transition-colors w-full text-left">
+        <button
+          onClick={() => { onLogout(); onClose() }}
+          className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-red-400 hover:bg-red-500/10 transition-colors w-full text-left"
+        >
           <LogOut size={14} />
           Sair
         </button>

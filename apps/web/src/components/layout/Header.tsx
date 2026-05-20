@@ -16,12 +16,19 @@ interface HeaderProps {
   onOpenSelector: () => void
   onDeposito?: () => void
   onRetirada?: () => void
+  onTransacoes?: () => void
+  onOperacoes?: () => void
+  onMinhaConta?: () => void
+  onLogout?: () => void
+  onResetDemo?: () => Promise<void>
   isDemo: boolean
   onSelectDemo: () => void
   onSelectReal: () => void
   demoBalance: number
   realBalance: number
   balance: number
+  userEmail?: string
+  userId?: string
 }
 
 export function Header({
@@ -33,12 +40,19 @@ export function Header({
   onOpenSelector,
   onDeposito,
   onRetirada,
+  onTransacoes,
+  onOperacoes,
+  onMinhaConta,
+  onLogout,
+  onResetDemo,
   isDemo,
   onSelectDemo,
   onSelectReal,
   demoBalance,
   realBalance,
   balance,
+  userEmail = '',
+  userId = '',
 }: HeaderProps) {
   const [accountOpen, setAccountOpen] = useState(false)
 
@@ -107,7 +121,16 @@ export function Header({
                 onSelectReal={() => { onSelectReal(); setAccountOpen(false) }}
                 demoBalance={demoBalance}
                 realBalance={realBalance}
+                userEmail={userEmail}
+                userId={userId}
                 onClose={() => setAccountOpen(false)}
+                onLogout={onLogout ?? (() => {})}
+                onResetDemo={onResetDemo ?? (() => Promise.resolve())}
+                onDeposito={onDeposito ?? (() => {})}
+                onRetirada={onRetirada ?? (() => {})}
+                onTransacoes={onTransacoes ?? (() => {})}
+                onOperacoes={onOperacoes ?? (() => {})}
+                onMinhaConta={onMinhaConta ?? (() => {})}
               />
             )}
           </div>

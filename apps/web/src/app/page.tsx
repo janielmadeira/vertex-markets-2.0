@@ -135,12 +135,19 @@ export default function TradingPage() {
             onOpenSelector={() => setAssetSelectorOpen(true)}
             onDeposito={() => setDepositoOpen(true)}
             onRetirada={() => { setContaInitialTab('retirada'); setSidebarTab('CONTA') }}
+            onTransacoes={() => { setContaInitialTab('minha-conta'); setSidebarTab('CONTA') }}
+            onOperacoes={() => setSidebarTab('TRADE')}
+            onMinhaConta={() => { setContaInitialTab('minha-conta'); setSidebarTab('CONTA') }}
+            onLogout={() => { authStore.logout().then(() => router.replace('/login')) }}
+            onResetDemo={() => authStore.resetDemo()}
             isDemo={isDemo}
             onSelectDemo={handleSelectDemo}
             onSelectReal={handleSelectReal}
             demoBalance={demoBalance}
             realBalance={realBalance}
             balance={balance}
+            userEmail={authStore.user?.email ?? ''}
+            userId={authStore.user?.id ?? ''}
           />
           <div className="flex-1 flex min-h-0 overflow-hidden relative">
             {renderMainContent(false)}
@@ -198,7 +205,16 @@ export default function TradingPage() {
                     onSelectReal={() => { handleSelectReal(); setMobileAccountOpen(false) }}
                     demoBalance={demoBalance}
                     realBalance={realBalance}
+                    userEmail={authStore.user?.email ?? ''}
+                    userId={authStore.user?.id ?? ''}
                     onClose={() => setMobileAccountOpen(false)}
+                    onLogout={() => { authStore.logout().then(() => router.replace('/login')) }}
+                    onResetDemo={() => authStore.resetDemo()}
+                    onDeposito={() => { setDepositoOpen(true); setMobileAccountOpen(false) }}
+                    onRetirada={() => { setContaInitialTab('retirada'); setSidebarTab('CONTA'); setMobileAccountOpen(false) }}
+                    onTransacoes={() => { setContaInitialTab('minha-conta'); setSidebarTab('CONTA'); setMobileAccountOpen(false) }}
+                    onOperacoes={() => { setSidebarTab('TRADE'); setMobileAccountOpen(false) }}
+                    onMinhaConta={() => { setContaInitialTab('minha-conta'); setSidebarTab('CONTA'); setMobileAccountOpen(false) }}
                   />
                 </div>
               )}
