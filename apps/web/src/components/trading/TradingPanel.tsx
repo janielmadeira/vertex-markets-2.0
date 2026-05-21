@@ -91,7 +91,11 @@ function TradeItem({ trade, shortLabels }: { trade: OpenTrade; shortLabels: bool
 
 export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, mobile = false, accountId, onTradePlaced }: TradingPanelProps) {
   const [investment, setInvestment] = useState(15000)
+  const [investmentRaw, setInvestmentRaw] = useState('')
+  const [editingInvestment, setEditingInvestment] = useState(false)
   const [timeIndex, setTimeIndex] = useState(6) // 900s = 15:00
+  const [timeRaw, setTimeRaw] = useState('')
+  const [editingTime, setEditingTime] = useState(false)
   const [pendingEnabled, setPendingEnabled] = useState(false)
   const [openTrades] = useState<OpenTrade[]>(MOCK_OPEN_TRADES)
   const [confirmTrade, setConfirmTrade] = useState<'CALL' | 'PUT' | null>(null)
@@ -101,6 +105,31 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
 
   const payout  = asset.payout / 100
   const payment = Math.round(investment + investment * payout)
+
+  function commitInvestment(raw: string) {
+    const num = parseFloat(raw.replace(/[^0-9.]/g, ''))
+    if (!isNaN(num) && num >= 1) setInvestment(Math.round(num))
+    setEditingInvestment(false)
+  }
+
+  function commitTime(raw: string) {
+    // Accept formats: "MM:SS", "MM", seconds number
+    const trimmed = raw.trim()
+    let secs = 0
+    if (trimmed.includes(':')) {
+      const [mm, ss] = trimmed.split(':').map(Number)
+      secs = (mm || 0) * 60 + (ss || 0)
+    } else {
+      secs = parseInt(trimmed) * 60 // treat as minutes
+    }
+    if (secs > 0) {
+      // Find closest TIME_OPTIONS index
+      const closest = TIME_OPTIONS.reduce((best, opt, i) =>
+        Math.abs(opt - secs) < Math.abs(TIME_OPTIONS[best] - secs) ? i : best, 0)
+      setTimeIndex(closest)
+    }
+    setEditingTime(false)
+  }
 
   async function placeTrade(direction: 'CALL' | 'PUT') {
     if (!accountId) return
@@ -183,8 +212,27 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
           >
             <Minus size={14} />
           </button>
-          <div className="flex-1 text-center text-xl font-bold text-white font-mono tracking-wider">
-            {timeDisplay}
+          <div className="flex-1 text-center">
+            {editingTime ? (
+              <input
+                autoFocus
+                type="text"
+                value={timeRaw}
+                onChange={e => setTimeRaw(e.target.value)}
+                onBlur={() => commitTime(timeRaw)}
+                onKeyDown={e => { if (e.key === 'Enter') commitTime(timeRaw); if (e.key === 'Escape') setEditingTime(false) }}
+                placeholder={timeDisplay}
+                className="w-full bg-transparent text-xl font-bold text-white font-mono tracking-wider text-center outline-none border-b border-blue-500 placeholder:text-white/30"
+              />
+            ) : (
+              <button
+                onClick={() => { setTimeRaw(''); setEditingTime(true) }}
+                className="text-xl font-bold text-white font-mono tracking-wider hover:text-blue-300 transition-colors w-full"
+                title="Clique para editar"
+              >
+                {timeDisplay}
+              </button>
+            )}
           </div>
           <button
             onClick={() => adjustTime(1)}
@@ -205,8 +253,28 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
           >
             <Minus size={14} />
           </button>
-          <div className="flex-1 text-center text-base font-bold text-white">
-            {fmtMoney(investment)} R$
+          <div className="flex-1 text-center">
+            {editingInvestment ? (
+              <input
+                autoFocus
+                type="text"
+                inputMode="numeric"
+                value={investmentRaw}
+                onChange={e => setInvestmentRaw(e.target.value.replace(/[^0-9]/g, ''))}
+                onBlur={() => commitInvestment(investmentRaw)}
+                onKeyDown={e => { if (e.key === 'Enter') commitInvestment(investmentRaw); if (e.key === 'Escape') setEditingInvestment(false) }}
+                placeholder={String(investment)}
+                className="w-full bg-transparent text-base font-bold text-white text-center outline-none border-b border-blue-500 placeholder:text-white/30"
+              />
+            ) : (
+              <button
+                onClick={() => { setInvestmentRaw(''); setEditingInvestment(true) }}
+                className="text-base font-bold text-white hover:text-blue-300 transition-colors w-full"
+                title="Clique para editar"
+              >
+                {fmtMoney(investment)} R$
+              </button>
+            )}
           </div>
           <button
             onClick={() => adjustInvestment(1000)}
