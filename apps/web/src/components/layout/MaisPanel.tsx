@@ -95,10 +95,18 @@ function MiniFlag({ code1, code2 }: { code1: string; code2: string }) {
 function DirCircle({ dir }: { dir: string }) {
   return (
     <div className={cn(
-      'w-5 h-5 rounded-full flex items-center justify-center text-white font-bold text-xs flex-shrink-0',
+      'w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0',
       dir === 'up' ? 'bg-green-500' : 'bg-red-500'
     )}>
-      {dir === 'up' ? '+' : '−'}
+      {dir === 'up' ? (
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+          <path d="M5 8V2M5 2L2 5M5 2L8 5" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      ) : (
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+          <path d="M5 2V8M5 8L2 5M5 8L8 5" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      )}
     </div>
   )
 }
