@@ -99,7 +99,7 @@ export default function TradingPage() {
     if (sidebarTab === 'MERCADO')  return <MercadoPage />
     if (sidebarTab === 'MAIS')     return (
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        {!isMobile && <MaisPanel onClose={() => setSidebarTab('TRADE')} />}
+        {!isMobile && <MaisPanel onClose={() => setSidebarTab('TRADE')} onSelectAsset={(asset) => { handleSelectAsset(asset); setSidebarTab('TRADE') }} />}
         <TradingChart asset={selectedAsset} onInfoClick={() => setAssetInfoOpen(true)} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} />
         {!isMobile && <TradingPanel asset={selectedAsset} oneClickTrade={tradeSettings.oneClickTrade} shortLabels={tradeSettings.shortLabels} accountId={currentAccount?.id} onTradePlaced={() => authStore.refreshAccounts()} />}
       </div>

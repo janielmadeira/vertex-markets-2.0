@@ -3,9 +3,11 @@
 import { X, ChevronRight, ChevronLeft, Trophy, Radio, HelpCircle } from 'lucide-react'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
+import { ASSETS, type Asset } from '@/lib/mockData'
 
 interface MaisPanelProps {
   onClose: () => void
+  onSelectAsset?: (asset: Asset) => void
 }
 
 type MaisView = 'menu' | 'top' | 'sinais' | 'analise'
@@ -54,19 +56,24 @@ function Avatar({ flag }: { flag: string }) {
 
 /* ─── Sinais mock data ─── */
 const SINAIS_ATIVOS = [
-  { name: 'USD/PHP (OTC)', code1: 'us', code2: 'ph',            dir: 'up',   dur: '01:00:00', time: '20.05 14:48' },
-  { name: 'Zcash (OTC)',   code1: 'crypto:zec', code2: 'us',   dir: 'down', dur: '05:00',    time: '20.05 14:48' },
-  { name: 'CAD/CHF (OTC)', code1: 'ca', code2: 'ch',            dir: 'down', dur: '10:00',    time: '20.05 14:48' },
-  { name: 'Johnson & Johnson (OTC)', code1: 'us', code2: 'us', dir: 'up',   dur: '15:00',    time: '20.05 14:48' },
-  { name: 'Ripple (OTC)',  code1: 'crypto:xrp', code2: 'us',   dir: 'up',   dur: '45:00',    time: '20.05 14:49' },
+  { assetId: 'bch-otc',      name: 'Bitcoin Cash (OTC)',       code1: 'crypto:bch', code2: 'us', dir: 'down', dur: '15:00', time: '20.05 21:07' },
+  { assetId: 'dot-otc',      name: 'Polkadot (OTC)',           code1: 'crypto:dot', code2: 'us', dir: 'down', dur: '15:00', time: '20.05 21:07' },
+  { assetId: 'usd-ngn-otc',  name: 'USD/NGN (OTC)',            code1: 'us', code2: 'ng',         dir: 'up',   dur: '15:00', time: '20.05 21:06' },
+  { assetId: 'silver',       name: 'Silver (OTC)',             code1: 'us', code2: 'us',         dir: 'up',   dur: '05:00', time: '20.05 21:06' },
+  { assetId: 'aud-usd',      name: 'AUD/USD (OTC)',            code1: 'au', code2: 'us',         dir: 'up',   dur: '01:00:00', time: '20.05 21:07' },
+  { assetId: 'link-otc',     name: 'Chainlink (OTC)',          code1: 'crypto:link', code2: 'us', dir: 'up',  dur: '30:00', time: '20.05 21:07' },
+  { assetId: 'usd-jpy',      name: 'USD/JPY (OTC)',            code1: 'us', code2: 'jp',         dir: 'down', dur: '04:00:00', time: '20.05 21:07' },
+  { assetId: 'eur-chf-otc',  name: 'EUR/CHF (OTC)',            code1: 'eu', code2: 'ch',         dir: 'down', dur: '10:00', time: '20.05 21:07' },
+  { assetId: 'usd-mxn-otc',  name: 'USD/MXN (OTC)',           code1: 'us', code2: 'mx',         dir: 'up',   dur: '05:00', time: '20.05 21:07' },
+  { assetId: 'usd-brl-otc',  name: 'USD/BRL (OTC)',           code1: 'us', code2: 'br',         dir: 'up',   dur: '10:00', time: '20.05 21:07' },
 ]
 
 const SINAIS_PASSADOS = [
-  { name: 'Trump (OTC)',   code1: 'us', code2: 'us', dir: 'down', dur: '05:00', time: '20.05 14:46' },
-  { name: 'GBP/CHF',      code1: 'gb', code2: 'ch', dir: 'down', dur: '15:00', time: '20.05 14:46' },
-  { name: 'CHF/JPY',      code1: 'ch', code2: 'jp', dir: 'down', dur: '15:00', time: '20.05 14:46' },
-  { name: 'AUD/USD',      code1: 'au', code2: 'us', dir: 'up',   dur: '10:00', time: '20.05 14:46' },
-  { name: 'GBP/USD',      code1: 'gb', code2: 'us', dir: 'down', dur: '05:00', time: '20.05 14:46' },
+  { assetId: 'trump-otc',    name: 'Trump (OTC)',   code1: 'us', code2: 'us',         dir: 'down', dur: '05:00', time: '20.05 21:05' },
+  { assetId: 'gbp-chf-otc',  name: 'GBP/CHF (OTC)',code1: 'gb', code2: 'ch',         dir: 'down', dur: '15:00', time: '20.05 21:04' },
+  { assetId: 'aud-nzd-otc',  name: 'AUD/NZD (OTC)',code1: 'au', code2: 'nz',         dir: 'down', dur: '15:00', time: '20.05 21:03' },
+  { assetId: 'aud-usd',      name: 'AUD/USD',       code1: 'au', code2: 'us',         dir: 'up',   dur: '10:00', time: '20.05 21:02' },
+  { assetId: 'gbp-usd',      name: 'GBP/USD',       code1: 'gb', code2: 'us',         dir: 'down', dur: '05:00', time: '20.05 21:01' },
 ]
 
 function getImgSrc(code: string) {
@@ -96,7 +103,12 @@ function DirCircle({ dir }: { dir: string }) {
   )
 }
 
-function SinaisView({ onBack }: { onBack: () => void }) {
+function SinaisView({ onBack, onSelectAsset }: { onBack: () => void; onSelectAsset?: (asset: Asset) => void }) {
+  function handleSignalClick(assetId: string) {
+    const asset = ASSETS.find(a => a.id === assetId)
+    if (asset && onSelectAsset) onSelectAsset(asset)
+  }
+
   return (
     <>
       {/* Header */}
@@ -117,7 +129,11 @@ function SinaisView({ onBack }: { onBack: () => void }) {
         {/* Active signals */}
         <div className="flex flex-col">
           {SINAIS_ATIVOS.map((s, i) => (
-            <div key={i} className="flex items-center gap-2 px-4 py-2.5 border-b border-[#2a2e3b]/40 hover:bg-white/[0.02] transition-colors">
+            <button
+              key={i}
+              onClick={() => handleSignalClick(s.assetId)}
+              className="flex items-center gap-2 px-4 py-2.5 border-b border-[#2a2e3b]/40 hover:bg-white/[0.04] transition-colors w-full text-left cursor-pointer"
+            >
               <MiniFlag code1={s.code1} code2={s.code2} />
               <div className="flex-1 min-w-0">
                 <div className="text-xs font-semibold text-white truncate leading-tight">{s.name}</div>
@@ -127,7 +143,7 @@ function SinaisView({ onBack }: { onBack: () => void }) {
                 </div>
               </div>
               <DirCircle dir={s.dir} />
-            </div>
+            </button>
           ))}
         </div>
 
@@ -136,10 +152,10 @@ function SinaisView({ onBack }: { onBack: () => void }) {
           <span className="text-[9px] font-bold text-[#8b8f9a] tracking-widest">SINAIS PASSADOS</span>
         </div>
 
-        {/* Past signals */}
+        {/* Past signals — not clickable, just history */}
         <div className="flex flex-col gap-2 px-3 pb-3">
           {SINAIS_PASSADOS.map((s, i) => (
-            <div key={i} className="flex items-center gap-2 bg-[#252a3a] rounded-xl px-3 py-2.5">
+            <div key={i} className="flex items-center gap-2 bg-[#252a3a] rounded-xl px-3 py-2.5 opacity-60">
               <MiniFlag code1={s.code1} code2={s.code2} />
               <div className="flex-1 min-w-0">
                 <div className="text-xs font-semibold text-white truncate leading-tight">{s.name}</div>
@@ -256,7 +272,7 @@ const MENU_ITEMS = [
   },
 ]
 
-export function MaisPanel({ onClose }: MaisPanelProps) {
+export function MaisPanel({ onClose, onSelectAsset }: MaisPanelProps) {
   const [view, setView] = useState<MaisView>('menu')
 
   return (
@@ -265,7 +281,7 @@ export function MaisPanel({ onClose }: MaisPanelProps) {
       {view === 'top' ? (
         <TopView onBack={() => setView('menu')} />
       ) : view === 'sinais' ? (
-        <SinaisView onBack={() => setView('menu')} />
+        <SinaisView onBack={() => setView('menu')} onSelectAsset={(asset) => { onSelectAsset?.(asset); onClose() }} />
       ) : (
         <>
           {/* Header */}
