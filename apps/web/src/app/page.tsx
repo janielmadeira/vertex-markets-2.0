@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuthStore, useCurrentAccount } from '@/store/auth'
 import { GraduationCap, Gem, Plus, Bell, ChevronDown } from 'lucide-react'
@@ -22,7 +22,7 @@ import { MaisPanel } from '@/components/layout/MaisPanel'
 import { ConfiguracoesPanel, type TradeSettings } from '@/components/layout/ConfiguracoesPanel'
 import { DepositoModal } from '@/components/deposito/DepositoModal'
 import { AccountDropdown } from '@/components/layout/AccountDropdown'
-import { ASSETS, type Asset } from '@/lib/mockData'
+import { ASSETS, getOTCPrice, type Asset, type ActiveTrade } from '@/lib/mockData'
 import { cn } from '@/lib/utils'
 
 type SidebarTab = 'TRADE' | 'SUPORTE' | 'CONTA' | 'TORNEIOS' | 'MERCADO' | 'MAIS'
@@ -55,6 +55,35 @@ export default function TradingPage() {
   })
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('TRADE')
   const [mobileAccountOpen, setMobileAccountOpen] = useState(false)
+  const [activeTrades, setActiveTrades] = useState<ActiveTrade[]>([])
+  const [livePrice, setLivePrice] = useState<number | null>(null)
+  // Ref síncrono — TradingChart escreve diretamente, TradingPanel lê sem passar por re-render
+  const livePriceRef = useRef<number | null>(null)
+
+  // Pré-popula o ref com o preço OTC atual quando o asset muda,
+  // garantindo que o botão de compra use sempre o mesmo preço exibido no gráfico
+  useEffect(() => {
+    const BRT_OFFSET = -3 * 3600
+    const nowSec = Math.floor(Date.now() / 1000) + BRT_OFFSET
+    const p = getOTCPrice(selectedAsset.id, nowSec, selectedAsset.price)
+    livePriceRef.current = p
+    setLivePrice(p)
+  }, [selectedAsset.id])
+
+  function handlePriceUpdate(price: number) {
+    livePriceRef.current = price
+    setLivePrice(price)
+  }
+
+  function handleTradeOpened(trade: ActiveTrade) {
+    setActiveTrades(prev => [...prev, trade])
+    authStore.refreshAccounts()
+  }
+
+  function handleTradeExpired(id: string) {
+    setActiveTrades(prev => prev.filter(t => t.id !== id))
+    authStore.refreshAccounts()
+  }
 
   const isDemo      = authStore.isDemo
   const accounts    = authStore.user?.accounts ?? []
@@ -100,8 +129,8 @@ export default function TradingPage() {
     if (sidebarTab === 'MAIS')     return (
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {!isMobile && <MaisPanel onClose={() => setSidebarTab('TRADE')} onSelectAsset={(asset) => { handleSelectAsset(asset); setSidebarTab('TRADE') }} />}
-        <TradingChart asset={selectedAsset} onInfoClick={() => setAssetInfoOpen(true)} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} />
-        {!isMobile && <TradingPanel asset={selectedAsset} oneClickTrade={tradeSettings.oneClickTrade} shortLabels={tradeSettings.shortLabels} accountId={currentAccount?.id} onTradePlaced={() => authStore.refreshAccounts()} />}
+        <TradingChart asset={selectedAsset} onInfoClick={() => setAssetInfoOpen(true)} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades.filter(t => t.assetId === selectedAsset.id)} onPriceUpdate={handlePriceUpdate} />
+        {!isMobile && <TradingPanel asset={selectedAsset} oneClickTrade={tradeSettings.oneClickTrade} shortLabels={tradeSettings.shortLabels} accountId={currentAccount?.id} onTradeOpened={handleTradeOpened} onTradeExpired={handleTradeExpired} livePrice={livePrice} livePriceRef={livePriceRef} />}
       </div>
     )
     // TRADE (default)
@@ -113,8 +142,8 @@ export default function TradingPage() {
         {!isMobile && assetSelectorOpen && (
           <AssetSelectorModal selectedAsset={selectedAsset} onSelect={handleSelectAsset} onClose={() => setAssetSelectorOpen(false)} />
         )}
-        <TradingChart asset={selectedAsset} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} />
-        {!isMobile && <TradingPanel asset={selectedAsset} oneClickTrade={tradeSettings.oneClickTrade} shortLabels={tradeSettings.shortLabels} accountId={currentAccount?.id} onTradePlaced={() => authStore.refreshAccounts()} />}
+        <TradingChart asset={selectedAsset} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades.filter(t => t.assetId === selectedAsset.id)} onPriceUpdate={handlePriceUpdate} />
+        {!isMobile && <TradingPanel asset={selectedAsset} oneClickTrade={tradeSettings.oneClickTrade} shortLabels={tradeSettings.shortLabels} accountId={currentAccount?.id} onTradeOpened={handleTradeOpened} onTradeExpired={handleTradeExpired} livePrice={livePrice} livePriceRef={livePriceRef} />}
       </div>
     )
   }

@@ -49,8 +49,9 @@ export default function LoginPage() {
       await login(email, password)
       router.replace('/')
     } catch (err: any) {
-      const code = err.response?.data?.error
-      setError(code === 'INVALID_CREDENTIALS' ? 'E-mail ou senha incorretos.' : 'Erro ao entrar. Tente novamente.')
+      const msg = err.message ?? ''
+      if (msg.includes('Invalid login credentials')) setError('E-mail ou senha incorretos.')
+      else setError('Erro ao entrar. Tente novamente.')
     } finally {
       setLoading(false)
     }
@@ -68,8 +69,10 @@ export default function LoginPage() {
       await register(name, rEmail, rPassword)
       router.replace('/')
     } catch (err: any) {
-      const code = err.response?.data?.error
-      setError(code === 'EMAIL_TAKEN' ? 'Este e-mail já está em uso.' : 'Erro ao criar conta. Tente novamente.')
+      const msg = err.message ?? ''
+      if (msg.includes('EMAIL_CONFIRMATION_REQUIRED')) setError('Confirme seu e-mail antes de entrar.')
+      else if (msg.includes('already registered')) setError('Este e-mail já está em uso.')
+      else setError('Erro ao criar conta. Tente novamente.')
     } finally {
       setLoading(false)
     }

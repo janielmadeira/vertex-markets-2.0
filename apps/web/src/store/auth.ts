@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { api } from '@/lib/api'
+import { supabase } from '@/lib/supabase'
 
 export interface Account {
   id:       string
@@ -31,6 +31,30 @@ interface AuthState {
   resetDemo:       () => Promise<void>
 }
 
+async function fetchAccounts(userId: string): Promise<Account[]> {
+  const { data } = await supabase
+    .from('accounts')
+    .select('id, type, balance, currency')
+    .eq('user_id', userId)
+  return (data ?? []).map(a => ({ ...a, balance: String(a.balance) }))
+}
+
+async function buildUser(supabaseUser: any, accounts: Account[]): Promise<User> {
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('name, kyc_status')
+    .eq('id', supabaseUser.id)
+    .single()
+
+  return {
+    id:        supabaseUser.id,
+    name:      profile?.name ?? supabaseUser.email?.split('@')[0] ?? '',
+    email:     supabaseUser.email ?? '',
+    kycStatus: profile?.kyc_status ?? 'pending',
+    accounts,
+  }
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   user:    null,
   token:   null,
@@ -40,44 +64,54 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   setIsDemo: (v) => set({ isDemo: v }),
 
   login: async (email, password) => {
-    const { data } = await api.post('/auth/login', { email, password })
-    localStorage.setItem('token', data.token)
-    set({ user: data.user, token: data.token })
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) throw error
+    const accounts = await fetchAccounts(data.user.id)
+    const user = await buildUser(data.user, accounts)
+    set({ user, token: data.session.access_token })
   },
 
   register: async (name, email, password) => {
-    const { data } = await api.post('/auth/register', { name, email, password })
-    localStorage.setItem('token', data.token)
-    set({ user: data.user, token: data.token })
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { name } },
+    })
+    if (error) throw error
+    if (!data.session) throw new Error('EMAIL_CONFIRMATION_REQUIRED')
+    const accounts = await fetchAccounts(data.user!.id)
+    const user = await buildUser(data.user!, accounts)
+    set({ user, token: data.session.access_token })
   },
 
   logout: async () => {
-    await api.post('/auth/logout').catch(() => {})
-    localStorage.removeItem('token')
+    await supabase.auth.signOut()
     set({ user: null, token: null })
   },
 
   init: async () => {
-    const token = localStorage.getItem('token')
-    if (!token) { set({ loading: false }); return }
-    try {
-      const { data } = await api.get('/auth/me')
-      set({ user: data.user, token, loading: false })
-    } catch {
-      localStorage.removeItem('token')
-      set({ loading: false })
-    }
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) { set({ loading: false }); return }
+    const accounts = await fetchAccounts(session.user.id)
+    const user = await buildUser(session.user, accounts)
+    set({ user, token: session.access_token, loading: false })
+
+    // Mantém sessão sincronizada automaticamente
+    supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) set({ token: session.access_token })
+      else set({ user: null, token: null })
+    })
   },
 
   refreshAccounts: async () => {
-    const { data } = await api.get('/accounts')
     const user = get().user
     if (!user) return
-    set({ user: { ...user, accounts: data.accounts } })
+    const accounts = await fetchAccounts(user.id)
+    set({ user: { ...user, accounts } })
   },
 
   resetDemo: async () => {
-    await api.post('/accounts/demo/reset')
+    await supabase.rpc('reset_demo_account')
     await get().refreshAccounts()
   },
 }))

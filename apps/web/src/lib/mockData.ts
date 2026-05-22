@@ -1,3 +1,14 @@
+export interface ActiveTrade {
+  id: string
+  assetId: string
+  entryPrice: number
+  entryTime: number
+  expiryTime: number
+  direction: 'CALL' | 'PUT'
+  amount: number
+  payout: number
+}
+
 export interface Asset {
   id: string
   symbol: string
@@ -92,6 +103,17 @@ export const ASSETS: Asset[] = [
 
 export const DEFAULT_FAVORITES = ['eur-jpy', 'usd-jpy', 'aud-jpy', 'aud-usd', 'aud-chf', 'eur-gbp', 'cad-jpy', 'aud-cad', 'gbp-usd', 'eur-usd']
 
+export function getAssetDecimals(asset: Asset): number {
+  if (asset.category === 'Cripto')           return asset.price < 1 ? 4 : 2
+  if (asset.category === 'Ações')            return 2
+  if (asset.category === 'Matérias-Primas')  return 2
+  // Moedas / Forex
+  if (asset.symbol.includes('JPY'))          return 3
+  if (asset.price >= 20)                     return 2  // USD/EGP, USD/INR, USD/DZD, USD/COP, USD/ARS…
+  if (asset.price >= 5)                      return 3  // USD/BRL, USD/MXN
+  return 5                                             // EUR/USD, GBP/USD, AUD/USD…
+}
+
 export interface Candle {
   time: number
   open: number
@@ -100,46 +122,126 @@ export interface Candle {
   close: number
 }
 
-export function generateMockCandles(basePrice = 158.92, count = 120, interval = 60): Candle[] {
+const BRT_OFFSET = -3 * 3600 // UTC-3 (Horário de Brasília)
+
+function hashSeed(str: string): number {
+  let h = 2166136261
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i)
+    h = (h * 16777619) >>> 0
+  }
+  return h >>> 0
+}
+
+function makeRng(seed: number) {
+  let s = seed >>> 0
+  return () => {
+    s ^= s << 13; s ^= s >>> 17; s ^= s << 5
+    return (s >>> 0) / 0xffffffff
+  }
+}
+
+// Single deterministic value in [-1, 1] from a seed integer
+function randFromSeed(seed: number): number {
+  let s = (seed >>> 0) || 1
+  s ^= s << 13; s ^= s >>> 17; s ^= s << 5
+  s ^= s << 13; s ^= s >>> 17; s ^= s << 5
+  return (s >>> 0) / 0xFFFFFFFF * 2 - 1
+}
+
+// Value noise: smoothly interpolates between random targets at period boundaries.
+// Ensures price continuity (no jumps) while producing realistic trend-like movement.
+function valueNoise(periodSec: number, t: number, seed: number): number {
+  const idx  = Math.floor(t / periodSec)
+  const frac = (t % periodSec) / periodSec
+  const v0   = randFromSeed(seed ^ hashSeed(String(idx)))
+  const v1   = randFromSeed(seed ^ hashSeed(String(idx + 1)))
+  // Smoothstep — removes derivative discontinuities at period edges
+  const s    = frac * frac * (3 - 2 * frac)
+  return v0 * (1 - s) + v1 * s
+}
+
+// OTC price engine v2 — fractal value noise.
+// Replaces sine waves with realistic-looking trend phases that have momentum,
+// pullbacks, and volatility clustering. Each asset gets unique behavior via assetSeed.
+export function getOTCPrice(assetId: string, timestampSec: number, basePrice: number): number {
+  const seed = hashSeed(assetId)
+  const t    = timestampSec
+  // Amplitudes calibradas para OTC estilo Quotex:
+  // Mini-tendências de 3–8 candles com reversões frequentes.
+  // Componentes de curto prazo (5m, 15m) dominam o visual — parecido com o que
+  // um trader vê no 1m: mercado "vivo" sem tendência direcional forte.
+  const move =
+    valueNoise(14400, t, seed ^ 0xA1B2C3D4) * 0.008 +  // 4h macro (sutil — só define viés geral)
+    valueNoise(3600,  t, seed ^ 0xB2C3D4E5) * 0.006 +  // 1h sessão
+    valueNoise(900,   t, seed ^ 0xC3D4E5F6) * 0.005 +  // 15m momentum (mini-runs de 8–12 candles)
+    valueNoise(300,   t, seed ^ 0xD4E5F6A7) * 0.004 +  // 5m flow (mini-runs de 3–6 candles) ← dominante
+    valueNoise(120,   t, seed ^ 0xE1F2A3B4) * 0.003 +  // 2m oscilação rápida
+    valueNoise(60,    t, seed ^ 0xE5F6A7B8) * 0.0020 + // 1m tick individual
+    valueNoise(15,    t, seed ^ 0xF6A7B8C9) * 0.0008 + // 15s intra-candle
+    valueNoise(5,     t, seed ^ 0xA7B8C9DA) * 0.0003   // 5s micro
+  return Math.max(basePrice * (1 + move), basePrice * 0.001)
+}
+
+export function generateMockCandles(basePrice = 158.92, count = 120, interval = 60, seedKey = ''): Candle[] {
   const candles: Candle[] = []
-  const now = Math.floor(Date.now() / 1000)
-  // Align to candle boundary so live candle continues seamlessly
+  const now = Math.floor(Date.now() / 1000) + BRT_OFFSET
   const alignedNow = Math.floor(now / interval) * interval
 
-  let price = basePrice * (1 + (Math.random() - 0.5) * 0.02) // slight start variance
-  let trend = (Math.random() - 0.5) * 0.3
-  let trendAge = 0
-  const vol = basePrice * 0.0008 // volatility relative to price
+  // Extract assetId from seedKey (format: "assetId:interval") — falls back to random walk if absent
+  const assetId = seedKey.includes(':') ? seedKey.split(':')[0] : ''
+
+  if (!assetId) {
+    // Fallback: seeded random walk (non-OTC assets without a seedKey)
+    const rng = seedKey ? makeRng(hashSeed(seedKey)) : Math.random.bind(Math)
+    let price = basePrice * (1 + (rng() - 0.5) * 0.02)
+    let trend = (rng() - 0.5) * 0.3
+    let trendAge = 0
+    const vol = basePrice * 0.0008
+    for (let i = count; i >= 1; i--) {
+      trendAge++
+      if (trendAge > 8 + Math.floor(rng() * 12)) { trend = (rng() - 0.5) * 0.4; trendAge = 0 }
+      trend += (basePrice - price) / basePrice * 0.15
+      const open = price
+      let lo = open, hi = open
+      for (let t = 0; t < 8; t++) {
+        price += trend * vol + (rng() - 0.5) * vol * 1.5
+        if (price < lo) lo = price; if (price > hi) hi = price
+      }
+      const close = price
+      const wicks = vol * (0.3 + rng() * 0.5)
+      candles.push({ time: alignedNow - i * interval, open: parseFloat(open.toFixed(5)), high: parseFloat((hi + wicks).toFixed(5)), low: parseFloat((lo - wicks).toFixed(5)), close: parseFloat(close.toFixed(5)) })
+    }
+    return candles
+  }
+
+  // OTC: sample getOTCPrice at sub-intervals to build OHLC.
+  // 20 samples per candle gives accurate high/low without being too expensive.
+  const SAMPLES = 20
+  const step = Math.max(1, Math.floor(interval / SAMPLES))
+  const fmt = (v: number) => parseFloat(v.toFixed(5))
 
   for (let i = count; i >= 1; i--) {
-    // Evolve trend
-    trendAge++
-    if (trendAge > 8 + Math.floor(Math.random() * 12)) {
-      trend = (Math.random() - 0.5) * 0.4
-      trendAge = 0
+    const candleStart = alignedNow - i * interval
+    let hi = -Infinity, lo = Infinity
+    let open = 0, close = 0
+    for (let j = 0; j <= SAMPLES; j++) {
+      const s = getOTCPrice(assetId, candleStart + j * step, basePrice)
+      if (j === 0)       open  = s
+      if (j === SAMPLES) close = s
+      if (s > hi) hi = s
+      if (s < lo) lo = s
     }
-    // Mean reversion nudge
-    trend += (basePrice - price) / basePrice * 0.15
-
-    const open = price
-    // Simulate ticks inside candle
-    let lo = open, hi = open
-    for (let t = 0; t < 8; t++) {
-      price += trend * vol + (Math.random() - 0.5) * vol * 1.5
-      if (price < lo) lo = price
-      if (price > hi) hi = price
-    }
-    const close = price
-    const wicks = vol * (0.3 + Math.random() * 0.5)
-    const high = parseFloat((hi + wicks).toFixed(5))
-    const low  = parseFloat((lo  - wicks).toFixed(5))
-
+    // Wicks proporcionais ao corpo — estilo Quotex OTC: discretos, não exagerados.
+    const bodySize  = Math.abs(close - open)
+    const wickScale = (randFromSeed(hashSeed(assetId) ^ (candleStart >>> 2)) + 1) / 2  // [0, 1]
+    const wickExtra = bodySize * (0.08 + wickScale * 0.18)  // 8–26% do corpo
     candles.push({
-      time: alignedNow - i * interval,
-      open: parseFloat(open.toFixed(5)),
-      high,
-      low,
-      close: parseFloat(close.toFixed(5)),
+      time:  candleStart,
+      open:  fmt(open),
+      high:  fmt(hi  + wickExtra),
+      low:   fmt(lo  - wickExtra),
+      close: fmt(close),
     })
   }
 
@@ -152,18 +254,8 @@ export interface OpenTrade {
   direction: 'CALL' | 'PUT'
   amount: number
   profit: number
-  timeLeft: number
+  expiryTime: number  // Unix timestamp (seconds) when the trade expires
   entryPrice: number
 }
 
-const PFE = ASSETS.find(a => a.id === 'pfe-otc')!
-
-export const MOCK_OPEN_TRADES: OpenTrade[] = [
-  { id: '1', asset: PFE, direction: 'PUT',  amount: 13000, profit: 0, timeLeft: 5,  entryPrice: 28.14 },
-  { id: '2', asset: PFE, direction: 'PUT',  amount: 15000, profit: 0, timeLeft: 57, entryPrice: 28.10 },
-  { id: '3', asset: PFE, direction: 'CALL', amount: 15000, profit: 0, timeLeft: 58, entryPrice: 28.08 },
-  { id: '4', asset: PFE, direction: 'CALL', amount: 15000, profit: 0, timeLeft: 58, entryPrice: 28.12 },
-  { id: '5', asset: PFE, direction: 'PUT',  amount: 15000, profit: 0, timeLeft: 46, entryPrice: 28.15 },
-  { id: '6', asset: PFE, direction: 'PUT',  amount: 15000, profit: 0, timeLeft: 44, entryPrice: 28.09 },
-  { id: '7', asset: PFE, direction: 'CALL', amount: 15000, profit: 0, timeLeft: 56, entryPrice: 28.11 },
-]
+export const MOCK_OPEN_TRADES: OpenTrade[] = []
