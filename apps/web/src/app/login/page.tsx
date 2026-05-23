@@ -1,8 +1,11 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import { useAuthStore } from '@/store/auth'
+import { supabase } from '@/lib/supabase'
+import { MfaChallenge } from '@/components/auth/MfaChallenge'
 
 const COUNTRIES = [
   'Brasil', 'Portugal', 'Angola', 'Moçambique', 'Cabo Verde',
@@ -14,9 +17,13 @@ const CURRENCIES = ['BRL', 'USD', 'EUR', 'GBP', 'ARS', 'MXN']
 
 export default function LoginPage() {
   const [tab, setTab] = useState<'login' | 'register'>('login')
-  const router = useRouter()
+  const router        = useRouter()
+  const searchParams  = useSearchParams()
+  const redirectTo    = searchParams?.get('redirect') || '/'
   const login    = useAuthStore(s => s.login)
   const register = useAuthStore(s => s.register)
+
+  const [mfaStep, setMfaStep] = useState(false)
 
   // Login
   const [email,    setEmail]    = useState('')
@@ -47,7 +54,15 @@ export default function LoginPage() {
     setLoading(true)
     try {
       await login(email, password)
-      router.replace('/')
+
+      // Verifica se a conta exige 2FA
+      const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+      if (aal?.nextLevel === 'aal2' && aal?.currentLevel === 'aal1') {
+        setMfaStep(true)
+        return
+      }
+
+      router.replace(redirectTo)
     } catch (err: any) {
       const msg = err.message ?? ''
       if (msg.includes('Invalid login credentials')) setError('E-mail ou senha incorretos.')
@@ -55,6 +70,11 @@ export default function LoginPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  async function handleMfaCancel() {
+    await supabase.auth.signOut()
+    setMfaStep(false)
   }
 
   async function handleRegister(e: React.FormEvent) {
@@ -113,9 +133,17 @@ export default function LoginPage() {
       {/* Content */}
       <div className="relative z-10 flex-1 flex flex-col items-center justify-start pt-8 px-4">
         <h1 className="text-white text-2xl font-bold mb-6">
-          {tab === 'login' ? 'Conecte-se' : 'Inscrever-se'}
+          {mfaStep ? 'Verificação de segurança' : (tab === 'login' ? 'Conecte-se' : 'Inscrever-se')}
         </h1>
 
+        {mfaStep ? (
+          <div className="w-full max-w-sm bg-[#161b27]/90 backdrop-blur rounded-xl shadow-2xl border border-white/5 p-6">
+            <MfaChallenge
+              onSuccess={() => router.replace(redirectTo)}
+              onCancel={handleMfaCancel}
+            />
+          </div>
+        ) : (
         <div className="w-full max-w-sm bg-[#161b27]/90 backdrop-blur rounded-xl overflow-visible shadow-2xl border border-white/5">
 
           {/* Tabs */}
@@ -151,9 +179,9 @@ export default function LoginPage() {
                     <input type="checkbox" className="accent-blue-500 w-3.5 h-3.5" />
                     Lembrar-me
                   </label>
-                  <button type="button" className="text-blue-400 hover:text-blue-300 transition-colors">
+                  <Link href="/forgot-password" className="text-blue-400 hover:text-blue-300 transition-colors">
                     Esqueceu sua senha?
-                  </button>
+                  </Link>
                 </div>
 
                 {error && <p className="text-red-400 text-xs text-center">{error}</p>}
@@ -265,6 +293,7 @@ export default function LoginPage() {
             </div>
           </div>
         </div>
+        )}
       </div>
     </div>
   )

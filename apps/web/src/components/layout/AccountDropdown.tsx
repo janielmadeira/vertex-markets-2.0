@@ -111,10 +111,13 @@ export function AccountDropdown({
         <div className="h-px bg-[#2a2e3b]" />
 
         {/* Real account */}
-        <button
+        <div
           onClick={onSelectReal}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => e.key === 'Enter' && onSelectReal()}
           className={cn(
-            'w-full text-left rounded-lg p-3 transition-colors border',
+            'w-full text-left rounded-lg p-3 transition-colors border cursor-pointer',
             !isDemo ? 'border-blue-500/40 bg-blue-500/5' : 'border-transparent hover:bg-white/5'
           )}
         >
@@ -131,18 +134,24 @@ export function AccountDropdown({
                 R${realBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
               </div>
               <div className="text-[11px] text-[#8b8f9a] mt-1">O limite diário não está definido</div>
-              <button className="text-[10px] font-bold text-blue-400 mt-0.5 hover:text-blue-300 transition-colors tracking-wide">
+              <button
+                onClick={(e) => e.stopPropagation()}
+                className="text-[10px] font-bold text-blue-400 mt-0.5 hover:text-blue-300 transition-colors tracking-wide"
+              >
                 DEFINIR O LIMITE
               </button>
             </div>
           </div>
-        </button>
+        </div>
 
         {/* Demo account */}
-        <button
+        <div
           onClick={onSelectDemo}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => e.key === 'Enter' && onSelectDemo()}
           className={cn(
-            'w-full text-left rounded-lg p-3 transition-colors border',
+            'w-full text-left rounded-lg p-3 transition-colors border cursor-pointer',
             isDemo ? 'border-blue-500/40 bg-blue-500/5' : 'border-transparent hover:bg-white/5'
           )}
         >
@@ -182,7 +191,7 @@ export function AccountDropdown({
               </div>
             </div>
           </div>
-        </button>
+        </div>
       </div>
 
       {/* Right panel — navigation */}
