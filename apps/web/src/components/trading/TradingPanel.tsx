@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import { FlagPair } from '@/components/ui/FlagPair'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
+import { isMarketOpen, nextOpenAt, formatTimeUntil } from '@/lib/marketHours'
 
 interface TradingPanelProps {
   asset: Asset
@@ -188,6 +189,16 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
     const id = setInterval(() => setNowBRT(nowBRTSec()), 1000)
     return () => clearInterval(id)
   }, [])
+
+  // Market hours: re-render a cada minuto pra atualizar countdown
+  const [nowTick, setNowTick] = useState(Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 30_000)
+    return () => clearInterval(id)
+  }, [])
+  const marketOpen = isMarketOpen(asset, new Date(nowTick))
+  const nextOpen   = !marketOpen ? nextOpenAt(asset, new Date(nowTick)) : null
+  const reopenIn   = nextOpen ? formatTimeUntil(nextOpen, new Date(nowTick)) : ''
   const [openTrades, setOpenTrades] = useState<OpenTrade[]>([])
   const [confirmTrade, setConfirmTrade] = useState<'CALL' | 'PUT' | null>(null)
   const [activeTab, setActiveTab] = useState<'operacoes' | 'historico' | 'pedidos'>('pedidos')
@@ -759,10 +770,19 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
           </div>
         ) : (
           <>
+            {!marketOpen && (
+              <div className="mb-3 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-center">
+                <div className="text-xs font-bold text-red-400 mb-0.5">⏸ Mercado fechado</div>
+                <div className="text-[10px] text-[#bdc1cc]">
+                  Forex opera de Dom 22h UTC a Sex 22h UTC. Reabre em <span className="font-bold text-white">{reopenIn}</span>.
+                </div>
+              </div>
+            )}
             <button
               onClick={() => oneClickTrade ? placeTrade('CALL') : setConfirmTrade('CALL')}
-              disabled={placing || livePrice == null}
-              className="w-full h-14 rounded-xl bg-[#26a69a] hover:bg-[#2bbbad] active:scale-[0.97] active:bg-[#00897b] transition-all flex items-center justify-between px-5 font-bold text-white text-base shadow-lg shadow-[#26a69a]/20 disabled:opacity-50"
+              disabled={placing || livePrice == null || !marketOpen}
+              title={!marketOpen ? `Mercado fechado · reabre em ${reopenIn}` : ''}
+              className="w-full h-14 rounded-xl bg-[#26a69a] hover:bg-[#2bbbad] active:scale-[0.97] active:bg-[#00897b] transition-all flex items-center justify-between px-5 font-bold text-white text-base shadow-lg shadow-[#26a69a]/20 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#26a69a]"
             >
               <span className="text-base font-black">Para cima</span>
               <div className="w-9 h-9 rounded-full bg-white/15 flex items-center justify-center flex-shrink-0 border border-white/20">
@@ -771,8 +791,9 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
             </button>
             <button
               onClick={() => oneClickTrade ? placeTrade('PUT') : setConfirmTrade('PUT')}
-              disabled={placing || livePrice == null}
-              className="w-full h-14 rounded-xl bg-[#ef5350] hover:bg-[#f44336] active:scale-[0.97] active:bg-[#c62828] transition-all flex items-center justify-between px-5 font-bold text-white text-base shadow-lg shadow-[#ef5350]/20 disabled:opacity-50"
+              disabled={placing || livePrice == null || !marketOpen}
+              title={!marketOpen ? `Mercado fechado · reabre em ${reopenIn}` : ''}
+              className="w-full h-14 rounded-xl bg-[#ef5350] hover:bg-[#f44336] active:scale-[0.97] active:bg-[#c62828] transition-all flex items-center justify-between px-5 font-bold text-white text-base shadow-lg shadow-[#ef5350]/20 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#ef5350]"
             >
               <span className="text-base font-black">Para baixo</span>
               <div className="w-9 h-9 rounded-full bg-white/15 flex items-center justify-center flex-shrink-0 border border-white/20">

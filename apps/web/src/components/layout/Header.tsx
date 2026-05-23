@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import { AccountDropdown } from './AccountDropdown'
 import { FlagPair } from '@/components/ui/FlagPair'
 import { isRealMarket, getMarketSource } from '@/lib/marketSymbols'
+import { isMarketOpen } from '@/lib/marketHours'
 
 interface HeaderProps {
   selectedAsset: Asset
@@ -181,7 +182,11 @@ export function Header({
               <div>
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs font-semibold leading-tight">{asset.symbol}</span>
-                  {isRealMarket(asset.id) && (
+                  {!isMarketOpen(asset) ? (
+                    <span className="text-[8px] font-bold px-1 py-0.5 rounded leading-none bg-red-500/20 text-red-400">
+                      FECHADO
+                    </span>
+                  ) : isRealMarket(asset.id) && (
                     <span className={cn(
                       'text-[8px] font-bold px-1 py-0.5 rounded leading-none',
                       getMarketSource(asset.id) === 'binance'

@@ -6,6 +6,7 @@ import { ASSETS, DEFAULT_FAVORITES, type Asset } from '@/lib/mockData'
 import { cn } from '@/lib/utils'
 import { FlagPair } from '@/components/ui/FlagPair'
 import { isRealMarket, getMarketSource } from '@/lib/marketSymbols'
+import { isMarketOpen } from '@/lib/marketHours'
 
 interface AssetSelectorModalProps {
   selectedAsset: Asset
@@ -144,6 +145,7 @@ export function AssetSelectorModal({ selectedAsset, onSelect, onClose }: AssetSe
             const isUp = asset.change24h >= 0
             const prevAsset = filtered[index - 1]
             const showGroupDivider = index > 0 && asset.type !== prevAsset?.type
+            const marketOpen = isMarketOpen(asset)
 
             return (
               <div key={asset.id}>
@@ -158,7 +160,8 @@ export function AssetSelectorModal({ selectedAsset, onSelect, onClose }: AssetSe
                 onClick={() => { onSelect(asset); onClose() }}
                 className={cn(
                   'grid grid-cols-[1fr_100px_90px_80px] items-center px-4 py-2.5 cursor-pointer transition-colors border-b border-[#1e2235]',
-                  isActive ? 'bg-[#252a3a]' : 'hover:bg-white/5'
+                  isActive ? 'bg-[#252a3a]' : 'hover:bg-white/5',
+                  !marketOpen && 'opacity-50'
                 )}
               >
                 {/* Name */}
@@ -174,7 +177,12 @@ export function AssetSelectorModal({ selectedAsset, onSelect, onClose }: AssetSe
                   </button>
                   <FlagPair code1={asset.code1} code2={asset.code2} size={22} />
                   <span className="text-sm font-semibold text-white truncate">{asset.symbol}</span>
-                  {isRealMarket(asset.id) ? (
+                  {!marketOpen && (
+                    <span className="text-[8px] font-bold px-1.5 py-0.5 rounded flex-shrink-0 leading-none bg-red-500/15 text-red-400 border border-red-500/30">
+                      FECHADO
+                    </span>
+                  )}
+                  {marketOpen && isRealMarket(asset.id) ? (
                     <span className={cn(
                       'text-[8px] font-bold px-1.5 py-0.5 rounded flex-shrink-0 leading-none',
                       getMarketSource(asset.id) === 'binance'
@@ -183,7 +191,7 @@ export function AssetSelectorModal({ selectedAsset, onSelect, onClose }: AssetSe
                     )}>
                       {getMarketSource(asset.id) === 'binance' ? 'BINANCE' : 'LIVE'}
                     </span>
-                  ) : asset.type === 'OTC' && (
+                  ) : marketOpen && asset.type === 'OTC' && (
                     <span className="text-[9px] text-[#8b8f9a] border border-[#3a3f50] px-1 py-0.5 rounded flex-shrink-0">OTC</span>
                   )}
                 </div>

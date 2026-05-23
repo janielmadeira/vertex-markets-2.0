@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase'
 import {
   Search, Loader2, RotateCw, CheckCircle2, Clock, XCircle, AlertTriangle,
   DollarSign, ArrowUpCircle, AlertCircle, ShieldCheck, ShieldAlert,
-  CheckCheck, Ban, Banknote,
+  CheckCheck, Ban, Banknote, Zap,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Confirm2FAModal } from '@/components/auth/Confirm2FAModal'
@@ -142,6 +142,47 @@ export default function SaquesAdminPage() {
       if (error) throw error
       await Promise.all([loadRows(), loadStats()])
     } catch (e: any) { alert('Erro: ' + e.message) } finally { setBusyId(null) }
+  }
+
+  async function handlePayoutBSPay(r: Row) {
+    if (!confirm(
+      `⚡ PAGAR via BSPay (automático)?\n\n` +
+      `Usuário: ${r.user_name}\n` +
+      `Valor: R$ ${Number(r.amount).toFixed(2)}\n` +
+      `Chave PIX: ${r.pix_key} (${r.pix_key_type})\n\n` +
+      `Isso vai DEBITAR sua carteira BSPay e enviar o PIX agora.\n` +
+      `Sem volta.\n\nConfirmar?`
+    )) return
+
+    const doPayout = async () => {
+      setBusyId(r.id)
+      try {
+        const res = await fetch('/api/admin/withdrawals/payout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ withdrawal_id: r.id }),
+        })
+        const json = await res.json()
+        if (!res.ok) {
+          if (typeof json.error === 'string' && (json.error.includes('MFA_REQUIRED') || json.error.includes('MFA_STALE'))) {
+            setMfaPrompt({
+              message: `Por segurança, confirme seu código 2FA para EXECUTAR o pagamento BSPay de R$ ${Number(r.amount).toFixed(2)} para ${r.user_name}.`,
+              onSuccess: () => { setMfaPrompt(null); doPayout() },
+            })
+            return
+          }
+          throw new Error(json.error ?? 'Falha no pagamento')
+        }
+        if (json.immediatelyPaid) {
+          alert(`✅ Pago com sucesso!\n\nE2E ID: ${json.e2eId ?? json.bspayPayoutId}`)
+        } else {
+          alert(`⏳ Pagamento enviado para BSPay (status: ${json.bspayStatus}).\n\nID BSPay: ${json.bspayPayoutId}\n\nO status será atualizado automaticamente via webhook quando liquidar.`)
+        }
+        await Promise.all([loadRows(), loadStats()])
+      } catch (e: any) { alert('Erro: ' + e.message) } finally { setBusyId(null) }
+    }
+
+    await doPayout()
   }
 
   async function handleMarkPaid(r: Row) {
@@ -318,8 +359,23 @@ export default function SaquesAdminPage() {
                         </>
                       )}
                       {r.status === 'approved' && (
-                        <ActionBtn onClick={() => handleMarkPaid(r)} disabled={busyId === r.id} title="Marcar como pago (após enviar PIX)" variant="pay">
-                          <Banknote size={11} />Marcar Pago
+                        <>
+                          <ActionBtn onClick={() => handlePayoutBSPay(r)} disabled={busyId === r.id} title="Pagar automaticamente via BSPay" variant="bspay">
+                            <Zap size={11} />Pagar BSPay
+                          </ActionBtn>
+                          <ActionBtn onClick={() => handleMarkPaid(r)} disabled={busyId === r.id} title="Marcar como pago manualmente (PIX externo)" variant="pay">
+                            <Banknote size={11} />Manual
+                          </ActionBtn>
+                        </>
+                      )}
+                      {r.status === 'payout_processing' && (
+                        <span className="text-[10px] text-blue-400 font-bold flex items-center gap-1">
+                          <Loader2 size={11} className="animate-spin" /> Processando BSPay
+                        </span>
+                      )}
+                      {r.status === 'payout_failed' && (
+                        <ActionBtn onClick={() => handlePayoutBSPay(r)} disabled={busyId === r.id} title="Tentar pagamento novamente" variant="bspay">
+                          <Zap size={11} />Tentar novamente
                         </ActionBtn>
                       )}
                       {r.status === 'paid' && r.payment_proof_id && (
@@ -413,11 +469,13 @@ function Tab({ children, active, onClick }: { children: React.ReactNode; active:
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { color: 'green' | 'yellow' | 'red' | 'gray' | 'blue'; label: string; icon: React.ReactNode }> = {
-    paid:      { color: 'green',  label: 'Pago',       icon: <CheckCircle2 size={10} /> },
-    approved:  { color: 'blue',   label: 'Aprovado',   icon: <CheckCheck size={10} /> },
-    pending:   { color: 'yellow', label: 'Pendente',   icon: <Clock size={10} /> },
-    rejected:  { color: 'red',    label: 'Rejeitado',  icon: <XCircle size={10} /> },
-    cancelled: { color: 'gray',   label: 'Cancelado',  icon: <Ban size={10} /> },
+    paid:               { color: 'green',  label: 'Pago',         icon: <CheckCircle2 size={10} /> },
+    approved:           { color: 'blue',   label: 'Aprovado',     icon: <CheckCheck size={10} /> },
+    pending:            { color: 'yellow', label: 'Pendente',     icon: <Clock size={10} /> },
+    rejected:           { color: 'red',    label: 'Rejeitado',    icon: <XCircle size={10} /> },
+    cancelled:          { color: 'gray',   label: 'Cancelado',    icon: <Ban size={10} /> },
+    payout_processing:  { color: 'blue',   label: 'Processando',  icon: <Loader2 size={10} className="animate-spin" /> },
+    payout_failed:      { color: 'red',    label: 'Falha PIX',    icon: <AlertCircle size={10} /> },
   }
   const cfg = map[status] ?? { color: 'gray', label: status, icon: null }
   return <Pill color={cfg.color} icon={cfg.icon}>{cfg.label}</Pill>
@@ -458,12 +516,13 @@ function RiskFlags({ r }: { r: Row }) {
 
 function ActionBtn({ children, onClick, disabled, title, variant }: {
   children: React.ReactNode; onClick: () => void; disabled?: boolean; title: string
-  variant: 'approve' | 'reject' | 'pay'
+  variant: 'approve' | 'reject' | 'pay' | 'bspay'
 }) {
   const styleMap = {
     approve: 'border-green-500/40 text-green-400 hover:bg-green-500/10',
     reject:  'border-red-500/40 text-red-400 hover:bg-red-500/10',
     pay:     'border-blue-500/40 text-blue-400 hover:bg-blue-500/10',
+    bspay:   'border-purple-500/40 text-purple-400 hover:bg-purple-500/10 bg-purple-500/5',
   }[variant]
   return (
     <button
