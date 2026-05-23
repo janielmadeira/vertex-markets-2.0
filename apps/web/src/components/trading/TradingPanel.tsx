@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Minus, Plus, ArrowUp, ArrowDown, RefreshCw, ChevronDown, ChevronUp, ArrowLeftRight, Package, X } from 'lucide-react'
-import { ASSETS, type Asset, type OpenTrade, type ActiveTrade } from '@/lib/mockData'
+import { ASSETS, getOTCPrice, type Asset, type OpenTrade, type ActiveTrade } from '@/lib/mockData'
 import { cn } from '@/lib/utils'
 import { FlagPair } from '@/components/ui/FlagPair'
 import { supabase } from '@/lib/supabase'
@@ -51,7 +51,7 @@ function expiryLabel(duration: number, base: number) {
 }
 
 function fmtMoney(v: number) {
-  return v.toLocaleString('en-US')
+  return v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 function FloatingBox({ label, link, children }: {
@@ -78,9 +78,10 @@ function FloatingBox({ label, link, children }: {
   )
 }
 
-function TradeItem({ trade, shortLabels, onDoubleUp, onEarlyClose }: {
+function TradeItem({ trade, shortLabels, currentPrice, onDoubleUp, onEarlyClose }: {
   trade: OpenTrade
   shortLabels: boolean
+  currentPrice?: number
   onDoubleUp: (trade: OpenTrade, remaining: number) => void
   onEarlyClose: (trade: OpenTrade, refund: number) => void
 }) {
@@ -100,9 +101,16 @@ function TradeItem({ trade, shortLabels, onDoubleUp, onEarlyClose }: {
   const s = (remaining % 60).toString().padStart(2, '0')
 
   const name = trade.asset.label.length > 13 ? trade.asset.label.slice(0, 13) + '...' : trade.asset.label
-  // Saída antecipada retorna 20% e decresce com o tempo
-  const earlyExitValue = Math.max(1, Math.round(trade.amount * 0.2))
+  // Saída antecipada: 20% do valor quando há tempo restante, decrescendo até 0
+  const decay = trade.duration && trade.duration > 0 ? remaining / trade.duration : 1
+  const earlyExitValue = Math.max(1, Math.round(trade.amount * 0.20 * decay))
   const canAct = remaining > 5 && !acting
+
+  // P&L em tempo real
+  const isWinning = currentPrice != null
+    ? (trade.direction === 'CALL' ? currentPrice > trade.entryPrice : currentPrice < trade.entryPrice)
+    : null
+  const unrealizedPnL = isWinning ? Math.round(trade.amount * (trade.asset.payout / 100)) : 0
 
   return (
     <div className="px-2 mb-px">
@@ -123,8 +131,13 @@ function TradeItem({ trade, shortLabels, onDoubleUp, onEarlyClose }: {
             'w-3 h-3 rounded-full flex-shrink-0',
             trade.direction === 'CALL' ? 'bg-green-500' : 'bg-red-500'
           )} />
-          <span className="text-[11px] text-[#8b8f9a] flex-1">{fmtMoney(trade.amount)} R$</span>
-          <span className="text-[11px] font-bold text-[#8b8f9a]">0.00 R$</span>
+          <span className="text-[11px] text-[#8b8f9a] flex-1">R$ {fmtMoney(trade.amount)}</span>
+          <span className={cn(
+            'text-[11px] font-bold tabular-nums',
+            isWinning === null ? 'text-[#8b8f9a]' : isWinning ? 'text-[#26a69a]' : 'text-[#ef5350]'
+          )}>
+            {isWinning === null ? '—' : isWinning ? `+R$ ${fmtMoney(unrealizedPnL)}` : 'R$ 0,00'}
+          </span>
         </div>
       </div>
 
@@ -163,7 +176,7 @@ function TradeItem({ trade, shortLabels, onDoubleUp, onEarlyClose }: {
 }
 
 export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, mobile = false, accountId, onTradeOpened, onTradeExpired, livePrice, livePriceRef: externalPriceRef }: TradingPanelProps) {
-  const [investment, setInvestment] = useState(15000)
+  const [investment, setInvestment] = useState(50)
   const [investmentRaw, setInvestmentRaw] = useState('')
   const [editingInvestment, setEditingInvestment] = useState(false)
   const [timeIndex, setTimeIndex] = useState(4) // 300s = 5 min
@@ -187,6 +200,56 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
   // Histórico de operações fechadas
   const [history, setHistory] = useState<ClosedTrade[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
+
+  // Mapa de timeouts por trade ID — permite cancelar no early close
+  const timeoutMap = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+
+  // Preços em tempo real por asset ID para calcular P&L das operações abertas
+  const [priceMap, setPriceMap] = useState<Map<string, number>>(new Map())
+
+  useEffect(() => {
+    if (openTrades.length === 0) return
+
+    const update = async () => {
+      const now = Math.floor(Date.now() / 1000)
+      const next = new Map<string, number>()
+
+      for (const trade of openTrades) {
+        const a = trade.asset
+
+        // Ativo atual: usa o preço ao vivo já disponível
+        if (a.id === asset.id && livePriceRef.current != null) {
+          next.set(a.id, livePriceRef.current)
+          continue
+        }
+
+        // OTC: calcula localmente (determinístico, sem API)
+        if (a.type === 'OTC') {
+          next.set(a.id, getOTCPrice(a.id, now, a.price))
+          continue
+        }
+
+        // Forex/Crypto: busca da API (mantém último valor se falhar)
+        try {
+          const { REAL_ASSETS } = await import('@/lib/marketSymbols')
+          const cfg = REAL_ASSETS[a.id]
+          if (!cfg) { next.set(a.id, a.price); continue }
+          const res = await fetch(`/api/market/price?symbol=${encodeURIComponent(cfg.symbol)}&source=${cfg.source}`)
+          const json = await res.json()
+          if (json.price) next.set(a.id, json.price)
+          else next.set(a.id, priceMap.get(a.id) ?? a.price)
+        } catch {
+          next.set(a.id, priceMap.get(a.id) ?? a.price)
+        }
+      }
+
+      setPriceMap(next)
+    }
+
+    update()
+    const interval = setInterval(update, 500)
+    return () => clearInterval(interval)
+  }, [openTrades, asset.id])
 
   const loadHistory = useCallback(async () => {
     if (!accountId) return
@@ -226,16 +289,18 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
       const assetObj = ASSETS.find(a => a.id === op.asset_id)
       if (!assetObj) continue
 
-      const expiresAtMs  = new Date(op.expires_at).getTime()
-      const remainingMs  = expiresAtMs - now
-      const utcExpiryTime = Math.floor(expiresAtMs / 1000)
-      const entryTime    = Math.floor(new Date(op.created_at).getTime() / 1000) + BRT_OFFSET
+      const expiresAtMs     = new Date(op.expires_at).getTime()
+      const createdAtMs     = new Date(op.created_at).getTime()
+      const remainingMs     = expiresAtMs - now
+      const totalDurationSec = Math.round((expiresAtMs - createdAtMs) / 1000)
+      const utcExpiryTime   = Math.floor(expiresAtMs / 1000)
+      const entryTime       = Math.floor(createdAtMs / 1000) + BRT_OFFSET
 
       if (remainingMs <= 0) {
         // Já venceu enquanto o usuário estava fora — liquida imediatamente
         supabase.rpc('settle_trade', {
           p_operation_id: op.id,
-          p_exit_price:   assetObj.price,
+          p_exit_price:   livePriceRef.current ?? assetObj.price,
         }).then(() => refreshAccounts())
         continue
       }
@@ -249,6 +314,7 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
         profit: 0,
         expiryTime: utcExpiryTime,
         entryPrice: op.entry_price,
+        duration: totalDurationSec,
       })
 
       // Notifica o gráfico para exibir a linha de entrada
@@ -264,7 +330,8 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
       })
 
       // Reregistra o timer de liquidação com o tempo restante real
-      setTimeout(async () => {
+      const tid = setTimeout(async () => {
+        timeoutMap.current.delete(op.id)
         const exitPrice = livePriceRef.current ?? assetObj.price
         const { data: result } = await supabase.rpc('settle_trade', {
           p_operation_id: op.id,
@@ -279,6 +346,7 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
         await refreshAccounts()
         loadHistory()
       }, remainingMs)
+      timeoutMap.current.set(op.id, tid)
     }
 
     if (toAdd.length > 0) {
@@ -293,6 +361,14 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
   useEffect(() => {
     loadOpenTrades()
   }, [loadOpenTrades])
+
+  // Cancela todos os timeouts pendentes ao desmontar o componente
+  useEffect(() => {
+    return () => {
+      timeoutMap.current.forEach(tid => clearTimeout(tid))
+      timeoutMap.current.clear()
+    }
+  }, [])
 
   // Ref interno como fallback — preferimos o externalPriceRef (síncrono, sem lag de re-render)
   const internalPriceRef = useRef(livePrice)
@@ -330,11 +406,13 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
     setOpenTrades(prev => [{
       id: newId, asset: trade.asset, direction: trade.direction,
       amount: trade.amount, profit: 0, expiryTime: utcExpiry, entryPrice,
+      duration: remaining,
     }, ...prev])
 
     onTradeOpened?.({ id: newId, assetId: trade.asset.id, entryPrice, entryTime, expiryTime, direction: trade.direction, amount: trade.amount, payout: trade.asset.payout })
 
-    setTimeout(async () => {
+    const tidDouble = setTimeout(async () => {
+      timeoutMap.current.delete(newId)
       const exitPrice = livePriceRef.current ?? trade.asset.price
       if (!newId.startsWith('local-')) {
         await supabase.rpc('settle_trade', { p_operation_id: newId, p_exit_price: exitPrice })
@@ -344,9 +422,17 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
       await refreshAccounts()
       if (activeTab === 'historico') loadHistory()
     }, remaining * 1000)
+    timeoutMap.current.set(newId, tidDouble)
   }
 
   async function handleEarlyClose(trade: OpenTrade, refund: number) {
+    // Cancela o timeout de liquidação para evitar double-settle
+    const tid = timeoutMap.current.get(trade.id)
+    if (tid !== undefined) {
+      clearTimeout(tid)
+      timeoutMap.current.delete(trade.id)
+    }
+
     if (!trade.id.startsWith('local-')) {
       const { error } = await supabase.rpc('early_close_trade', {
         p_operation_id: trade.id,
@@ -367,8 +453,8 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
   const payment   = Math.round(investment + investment * payout)
 
   function commitInvestment(raw: string) {
-    const num = parseFloat(raw.replace(/[^0-9.]/g, ''))
-    if (!isNaN(num) && num >= 1) setInvestment(Math.round(num))
+    const num = parseFloat(raw.replace(/[^0-9.,]/g, '').replace(',', '.'))
+    if (!isNaN(num) && num >= 1) setInvestment(Math.round(num * 100) / 100)
     setEditingInvestment(false)
   }
 
@@ -412,6 +498,7 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
         id: operationId, asset, direction,
         amount: investment, profit: 0,
         expiryTime: utcExpiryTime, entryPrice,
+        duration: expiresInSec,
       }, ...prev])
       setActiveTab('operacoes')
 
@@ -423,7 +510,8 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
       setConfirmTrade(null)
 
       // Liquidar operação ao expirar com o preço atual no momento da expiração
-      setTimeout(async () => {
+      const tidPlace = setTimeout(async () => {
+        timeoutMap.current.delete(operationId)
         const exitPrice = livePriceRef.current ?? asset.price
         let won = false
         let profit = 0
@@ -448,6 +536,7 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
         await refreshAccounts()
         if (activeTab === 'historico') loadHistory()
       }, expiresInSec * 1000)
+      timeoutMap.current.set(operationId, tidPlace)
 
     } catch {
       setTradeError('Erro ao abrir operação.')
@@ -459,7 +548,7 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
   const timeDisplay = expiryLabel(TIME_OPTIONS[timeIndex], nowBRT)
 
   function adjustInvestment(delta: number) {
-    setInvestment(v => Math.max(1000, v + delta))
+    setInvestment(v => Math.max(1, Math.round((v + delta) * 100) / 100))
   }
 
   function adjustTime(delta: number) {
@@ -473,36 +562,46 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
       {tradeResult && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center pointer-events-none">
           <div className={cn(
-            'pointer-events-auto px-7 py-5 rounded-xl shadow-2xl border relative min-w-[250px] text-center',
+            'pointer-events-auto px-8 py-6 rounded-2xl shadow-2xl border relative min-w-[260px] text-center backdrop-blur-sm',
             tradeResult.won
-              ? 'bg-green-600 border-green-400/60'
-              : 'bg-orange-600 border-orange-400/60'
+              ? 'bg-[#1a2e2a] border-[#26a69a]/50 shadow-[#26a69a]/10'
+              : 'bg-[#2e1a1a] border-[#ef5350]/50 shadow-[#ef5350]/10'
           )}>
             <button
               onClick={() => setTradeResult(null)}
-              className="absolute top-2 right-2 text-white/60 hover:text-white transition-colors"
+              className="absolute top-3 right-3 text-white/40 hover:text-white transition-colors"
             >
               <X size={14} />
             </button>
-            <p className="text-[10px] font-bold text-white/70 tracking-widest mb-2">
-              RESULTADO (LUCRO / PERDA)
+            <p className="text-[10px] font-bold tracking-widest mb-3 uppercase"
+              style={{ color: tradeResult.won ? '#26a69a' : '#ef5350' }}>
+              {tradeResult.won ? '✓ Operação Ganha' : '✗ Operação Perdida'}
             </p>
-            <p className="text-2xl font-bold text-white">
+            <p className={cn('text-3xl font-black tabular-nums', tradeResult.won ? 'text-[#26a69a]' : 'text-[#ef5350]')}>
               {tradeResult.won
-                ? `+${fmtMoney(tradeResult.profit)}.00 R$`
-                : '0.00 R$'}
+                ? `+R$ ${fmtMoney(tradeResult.profit)}`
+                : `-R$ ${fmtMoney(tradeResult.amount)}`}
+            </p>
+            <p className="text-[11px] text-white/40 mt-1">
+              {tradeResult.direction === 'CALL' ? 'Para cima' : 'Para baixo'} · R$ {fmtMoney(tradeResult.amount)}
             </p>
           </div>
         </div>
       )}
 
       {/* Asset header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-[#2a2e3b]">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-[#2a2e3b] bg-[#161929]">
         <div className="flex items-center gap-2 min-w-0">
-          <FlagPair code1={asset.code1} code2={asset.code2} size={20} />
-          <span className="text-sm font-bold text-white truncate">{asset.label}</span>
+          <FlagPair code1={asset.code1} code2={asset.code2} size={22} />
+          <div className="flex flex-col min-w-0">
+            <span className="text-sm font-bold text-white truncate leading-tight">{asset.label}</span>
+            <span className="text-[10px] text-[#8b8f9a] leading-tight">{asset.type}</span>
+          </div>
         </div>
-        <span className="text-base font-bold text-green-400 flex-shrink-0 ml-2">{payoutPct}%</span>
+        <div className="flex flex-col items-end flex-shrink-0 ml-2">
+          <span className="text-lg font-black text-[#26a69a] leading-tight tabular-nums">{payoutPct}%</span>
+          <span className="text-[10px] text-[#8b8f9a] leading-tight">Payout</span>
+        </div>
       </div>
 
       {/* Negociação Pendente */}
@@ -540,7 +639,7 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
           <div className="flex-1 text-center relative">
             <button
               onClick={() => setTimerPickerOpen(v => !v)}
-              className="text-xl font-bold text-white font-mono tracking-wider hover:text-blue-300 transition-colors w-full"
+              className="text-2xl font-black text-white font-mono tracking-widest hover:text-[#26a69a] transition-colors w-full tabular-nums"
             >
               {timeDisplay}
             </button>
@@ -585,7 +684,7 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
       <FloatingBox label="Investimento" link="TROCAR">
         <div className="flex items-center gap-2">
           <button
-            onClick={() => adjustInvestment(-1000)}
+            onClick={() => adjustInvestment(-10)}
             className="w-8 h-8 flex items-center justify-center rounded-full border border-[#3a3f50] text-[#8b8f9a] hover:text-white hover:border-white/30 transition-colors flex-shrink-0"
           >
             <Minus size={14} />
@@ -606,15 +705,15 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
             ) : (
               <button
                 onClick={() => { setInvestmentRaw(''); setEditingInvestment(true) }}
-                className="text-base font-bold text-white hover:text-blue-300 transition-colors w-full"
+                className="text-xl font-black text-white hover:text-[#26a69a] transition-colors w-full tabular-nums"
                 title="Clique para editar"
               >
-                {fmtMoney(investment)} R$
+                R$ {fmtMoney(investment)}
               </button>
             )}
           </div>
           <button
-            onClick={() => adjustInvestment(1000)}
+            onClick={() => adjustInvestment(10)}
             className="w-8 h-8 flex items-center justify-center rounded-full border border-[#3a3f50] text-[#8b8f9a] hover:text-white hover:border-white/30 transition-colors flex-shrink-0"
           >
             <Plus size={14} />
@@ -623,9 +722,9 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
       </FloatingBox>
 
       {/* Pagamento */}
-      <div className="flex items-center justify-between px-4 py-2 mt-1">
-        <span className="text-sm text-[#8b8f9a]">Pagamento</span>
-        <span className="text-sm font-bold text-white">{fmtMoney(payment)} R$</span>
+      <div className="flex items-center justify-between px-4 py-1.5">
+        <span className="text-xs text-[#8b8f9a]">Lucro estimado</span>
+        <span className="text-sm font-bold text-[#26a69a] tabular-nums">+R$ {fmtMoney(Math.round(investment * payout))}</span>
       </div>
 
       {/* CALL / PUT buttons */}
@@ -634,10 +733,10 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
           <div className="flex flex-col gap-2">
             <div className="text-center text-xs text-[#8b8f9a] font-semibold py-1">
               Confirmar{' '}
-              <span className={cn('font-bold', confirmTrade === 'CALL' ? 'text-green-400' : 'text-red-400')}>
+              <span className={cn('font-bold', confirmTrade === 'CALL' ? 'text-[#26a69a]' : 'text-[#ef5350]')}>
                 {confirmTrade === 'CALL' ? 'Para cima' : 'Para baixo'}
               </span>
-              {' '}— {fmtMoney(investment)} R$?
+              {' '}— R$ {fmtMoney(investment)}?
             </div>
             <div className="flex gap-2">
               <button
@@ -650,8 +749,8 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
                 onClick={() => confirmTrade && placeTrade(confirmTrade)}
                 disabled={placing}
                 className={cn(
-                  'flex-1 h-10 rounded-xl font-bold text-white text-sm transition-all active:scale-[0.98] disabled:opacity-50',
-                  confirmTrade === 'CALL' ? 'bg-green-500 hover:bg-green-400' : 'bg-red-500 hover:bg-red-400'
+                  'flex-1 h-10 rounded-xl font-bold text-white text-sm transition-all active:scale-[0.97] disabled:opacity-50',
+                  confirmTrade === 'CALL' ? 'bg-[#26a69a] hover:bg-[#2bbbad]' : 'bg-[#ef5350] hover:bg-[#f44336]'
                 )}
               >
                 {placing ? '...' : 'Confirmar'}
@@ -663,24 +762,24 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
             <button
               onClick={() => oneClickTrade ? placeTrade('CALL') : setConfirmTrade('CALL')}
               disabled={placing || livePrice == null}
-              className="w-full h-12 rounded-xl bg-green-500 hover:bg-green-400 active:scale-[0.98] transition-all flex items-center justify-between px-5 font-bold text-white text-base shadow-lg shadow-green-900/30 disabled:opacity-50"
+              className="w-full h-14 rounded-xl bg-[#26a69a] hover:bg-[#2bbbad] active:scale-[0.97] active:bg-[#00897b] transition-all flex items-center justify-between px-5 font-bold text-white text-base shadow-lg shadow-[#26a69a]/20 disabled:opacity-50"
             >
-              <span>Para cima</span>
-              <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0">
-                <ArrowUp size={16} strokeWidth={2.5} />
+              <span className="text-base font-black">Para cima</span>
+              <div className="w-9 h-9 rounded-full bg-white/15 flex items-center justify-center flex-shrink-0 border border-white/20">
+                <ArrowUp size={18} strokeWidth={2.5} />
               </div>
             </button>
             <button
               onClick={() => oneClickTrade ? placeTrade('PUT') : setConfirmTrade('PUT')}
               disabled={placing || livePrice == null}
-              className="w-full h-12 rounded-xl bg-red-500 hover:bg-red-400 active:scale-[0.98] transition-all flex items-center justify-between px-5 font-bold text-white text-base shadow-lg shadow-red-900/30 disabled:opacity-50"
+              className="w-full h-14 rounded-xl bg-[#ef5350] hover:bg-[#f44336] active:scale-[0.97] active:bg-[#c62828] transition-all flex items-center justify-between px-5 font-bold text-white text-base shadow-lg shadow-[#ef5350]/20 disabled:opacity-50"
             >
-              <span>Para baixo</span>
-              <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0">
-                <ArrowDown size={16} strokeWidth={2.5} />
+              <span className="text-base font-black">Para baixo</span>
+              <div className="w-9 h-9 rounded-full bg-white/15 flex items-center justify-center flex-shrink-0 border border-white/20">
+                <ArrowDown size={18} strokeWidth={2.5} />
               </div>
             </button>
-            {tradeError && <p className="text-red-400 text-xs text-center">{tradeError}</p>}
+            {tradeError && <p className="text-red-400 text-xs text-center mt-1">{tradeError}</p>}
           </>
         )}
       </div>
@@ -748,7 +847,14 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
                 </div>
               </div>
               {openTrades.map((trade) => (
-                <TradeItem key={trade.id} trade={trade} shortLabels={shortLabels} onDoubleUp={handleDoubleUp} onEarlyClose={handleEarlyClose} />
+                <TradeItem
+                  key={trade.id}
+                  trade={trade}
+                  shortLabels={shortLabels}
+                  currentPrice={priceMap.get(trade.asset.id)}
+                  onDoubleUp={handleDoubleUp}
+                  onEarlyClose={handleEarlyClose}
+                />
               ))}
             </>
           )

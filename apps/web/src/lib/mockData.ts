@@ -256,6 +256,7 @@ export interface OpenTrade {
   profit: number
   expiryTime: number  // Unix timestamp (seconds) when the trade expires
   entryPrice: number
+  duration?: number   // total duration in seconds (used for early exit decay)
 }
 
 export const MOCK_OPEN_TRADES: OpenTrade[] = []

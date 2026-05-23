@@ -1,57 +1,82 @@
 'use client'
 
-import { X, ChevronRight } from 'lucide-react'
+import { X, ChevronRight, MousePointer, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useState } from 'react'
 
 const DRAWING_TOOLS = [
-  { label: 'Linha horizontal' },
-  { label: 'Faixa de preço' },
-  { label: 'Parte superior/inferior plana' },
-  { label: 'Canal separado', dot: '#ef4444' },
-  { label: 'Arco' },
-  { label: 'Linha Cruzada' },
-  { label: 'Caixa Gann' },
-  { label: 'Ângulo de tendência' },
-  { label: 'Curva' },
-  { label: 'Data e faixa de preço' },
-  { label: 'Pitchfan' },
-  { label: 'Triângulo' },
-  { label: 'Retração de Fibonacci' },
-  { label: 'Canal paralelo' },
-  { label: 'Pitchfork' },
-  { label: 'Leque de Fibonacci' },
-  { label: 'Período' },
-  { label: 'Raio' },
-  { label: 'Linha Estendida' },
-  { label: 'Retângulo' },
-  { label: 'Linha vertical' },
-  { label: 'Linha de trend' },
+  { id: 'Linha horizontal',        label: 'Linha horizontal',        impl: true },
+  { id: 'Linha vertical',          label: 'Linha vertical',          impl: true },
+  { id: 'Linha de trend',          label: 'Linha de trend',          impl: true },
+  { id: 'Retração de Fibonacci',   label: 'Retração de Fibonacci',   impl: true },
+  { id: 'Faixa de preço',          label: 'Faixa de preço' },
+  { id: 'Parte superior/inferior plana', label: 'Parte superior/inferior plana' },
+  { id: 'Canal separado',          label: 'Canal separado',          dot: '#ef4444' },
+  { id: 'Arco',                    label: 'Arco' },
+  { id: 'Linha Cruzada',           label: 'Linha Cruzada' },
+  { id: 'Caixa Gann',              label: 'Caixa Gann' },
+  { id: 'Ângulo de tendência',     label: 'Ângulo de tendência' },
+  { id: 'Curva',                   label: 'Curva' },
+  { id: 'Data e faixa de preço',   label: 'Data e faixa de preço' },
+  { id: 'Pitchfan',                label: 'Pitchfan' },
+  { id: 'Triângulo',               label: 'Triângulo' },
+  { id: 'Canal paralelo',          label: 'Canal paralelo' },
+  { id: 'Pitchfork',               label: 'Pitchfork' },
+  { id: 'Leque de Fibonacci',      label: 'Leque de Fibonacci' },
+  { id: 'Período',                 label: 'Período' },
+  { id: 'Raio',                    label: 'Raio' },
+  { id: 'Linha Estendida',         label: 'Linha Estendida' },
+  { id: 'Retângulo',               label: 'Retângulo' },
 ]
 
 interface DrawingsPanelProps {
   onClose: () => void
+  activeTool?: string | null
+  onSelectTool?: (tool: string | null) => void
+  onClearAll?: () => void
 }
 
-export function DrawingsPanel({ onClose }: DrawingsPanelProps) {
-  const [selected, setSelected] = useState<string | null>(null)
-
+export function DrawingsPanel({ onClose, activeTool, onSelectTool, onClearAll }: DrawingsPanelProps) {
   return (
     <div className="absolute top-0 left-0 h-full z-30 flex" style={{ width: 220 }}>
       <div className="flex flex-col w-full bg-[#1a1e2e] border-r border-[#2a2e3b] shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-[#2a2e3b] flex-shrink-0">
           <h2 className="text-sm font-bold text-white">Desenhos</h2>
-          <button
-            onClick={onClose}
-            className="w-6 h-6 flex items-center justify-center text-[#8b8f9a] hover:text-white transition-colors"
-          >
-            <X size={14} />
-          </button>
+          <div className="flex items-center gap-1">
+            {onClearAll && (
+              <button
+                onClick={onClearAll}
+                title="Apagar todos os desenhos"
+                className="w-6 h-6 flex items-center justify-center text-[#8b8f9a] hover:text-red-400 transition-colors"
+              >
+                <Trash2 size={13} />
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="w-6 h-6 flex items-center justify-center text-[#8b8f9a] hover:text-white transition-colors"
+            >
+              <X size={14} />
+            </button>
+          </div>
         </div>
 
+        {/* Cursor (deselect tool) */}
+        <button
+          onClick={() => onSelectTool?.(null)}
+          className={cn(
+            'flex items-center gap-2 px-4 py-2.5 w-full transition-colors',
+            activeTool == null
+              ? 'bg-blue-600/20 text-white'
+              : 'text-[#8b8f9a] hover:bg-white/5 hover:text-white'
+          )}
+        >
+          <MousePointer size={13} />
+          <span className="text-[13px] font-medium">Cursor</span>
+        </button>
+
         {/* Section label */}
-        <div className="px-4 pt-3 pb-1">
+        <div className="px-4 pt-2 pb-1">
           <span className="text-[10px] font-bold text-[#8b8f9a] tracking-widest">DESENHOS</span>
         </div>
 
@@ -59,13 +84,16 @@ export function DrawingsPanel({ onClose }: DrawingsPanelProps) {
         <div className="flex-1 overflow-y-auto">
           {DRAWING_TOOLS.map((tool) => (
             <button
-              key={tool.label}
-              onClick={() => setSelected(tool.label)}
+              key={tool.id}
+              onClick={() => { if (tool.impl) onSelectTool?.(tool.id) }}
               className={cn(
                 'w-full flex items-center justify-between px-4 py-2.5 text-left transition-colors group',
-                selected === tool.label
+                !tool.impl && 'opacity-40 cursor-not-allowed',
+                activeTool === tool.id
                   ? 'bg-blue-600/20 text-white'
-                  : 'text-white hover:bg-white/5'
+                  : tool.impl
+                    ? 'text-white hover:bg-white/5'
+                    : 'text-[#8b8f9a]'
               )}
             >
               <div className="flex items-center gap-2">
@@ -74,7 +102,12 @@ export function DrawingsPanel({ onClose }: DrawingsPanelProps) {
                 )}
                 <span className="text-[13px] font-medium leading-tight">{tool.label}</span>
               </div>
-              <ChevronRight size={13} className="text-[#8b8f9a] group-hover:text-white transition-colors flex-shrink-0" />
+              {tool.impl && (
+                <ChevronRight size={13} className={cn(
+                  'flex-shrink-0 transition-colors',
+                  activeTool === tool.id ? 'text-blue-400' : 'text-[#8b8f9a] group-hover:text-white'
+                )} />
+              )}
             </button>
           ))}
         </div>

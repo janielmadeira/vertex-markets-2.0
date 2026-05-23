@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { X, ChevronRight, Clock } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { PixCheckout } from './PixCheckout'
 
 interface DepositoModalProps {
   onClose: () => void
@@ -160,7 +161,18 @@ const CATEGORIES = [
 ]
 
 export function DepositoModal({ onClose }: DepositoModalProps) {
-  const [category, setCategory] = useState<Category>('popular')
+  const [category, setCategory]     = useState<Category>('popular')
+  const [activeMethod, setActiveMethod] = useState<string | null>(null)
+
+  if (activeMethod === 'pix' || activeMethod === 'pix-epay') {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-[2px]">
+        <div className="relative bg-[#151822] rounded-2xl shadow-2xl border border-[#2a2e3b] w-[480px] max-h-[85vh] overflow-y-auto">
+          <PixCheckout onBack={() => setActiveMethod(null)} onSuccess={onClose} />
+        </div>
+      </div>
+    )
+  }
 
   const getMethodsForCategory = () => {
     if (category === 'epay')   return { sections: [{ title: `E-Pay (${EPAY_METHODS.length})`,   methods: EPAY_METHODS }] }
@@ -257,7 +269,15 @@ export function DepositoModal({ onClose }: DepositoModalProps) {
                 <h3 className="text-sm font-bold text-white mb-3">{section.title}</h3>
                 <div className="grid grid-cols-2 gap-2">
                   {section.methods.map((method) => (
-                    <MethodCard key={method.id} method={method} onSelect={() => {}} />
+                    <MethodCard
+                      key={method.id}
+                      method={method}
+                      onSelect={() => {
+                        if (method.id === 'pix' || method.id === 'pix-epay') {
+                          setActiveMethod(method.id)
+                        }
+                      }}
+                    />
                   ))}
                 </div>
               </div>

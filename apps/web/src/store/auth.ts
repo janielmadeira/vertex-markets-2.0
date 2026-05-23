@@ -101,6 +101,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (session) set({ token: session.access_token })
       else set({ user: null, token: null })
     })
+
+    // Real-time: atualiza saldo sempre que uma conta do usuário mudar
+    supabase
+      .channel('account-balance')
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'accounts',
+        filter: `user_id=eq.${session.user.id}`,
+      }, async () => {
+        const updated = await fetchAccounts(session.user.id)
+        set(state => state.user ? { user: { ...state.user, accounts: updated } } : {})
+      })
+      .subscribe()
   },
 
   refreshAccounts: async () => {

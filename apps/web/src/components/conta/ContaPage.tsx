@@ -1,12 +1,15 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   Camera, CheckCircle2, Lock, Globe, Clock, X, ChevronDown, Pencil,
-  AlertCircle, ChevronRight, Landmark, Zap, ChevronLeft,
+  AlertCircle, ChevronRight, Landmark, Zap, ChevronLeft, Loader2,
+  CheckCheck, Ban,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AnalisePage } from '@/components/analise/AnalisePage'
+import { supabase } from '@/lib/supabase'
+import { useAuthStore, useCurrentAccount } from '@/store/auth'
 
 type ContaTab = 'retirada' | 'transacoes' | 'operacoes' | 'minha-conta' | 'mercado' | 'torneios' | 'analise'
 
@@ -28,11 +31,24 @@ const FAQ_RETIRADA = [
   ['Preciso fornecer algum documento para fazer uma retirada?', ''],
 ]
 
-const MOCK_WITHDRAWALS = [
-  { id: '40741052802', date: '20.05.2026', time: '17:04:05', status: 'pending', method: 'USDT', amount: '-200.000,00 R$' },
-  { id: '40739150181', date: '04.03.2026', time: '03:10:17', status: 'cancelled', method: 'USDT', amount: '-100.000,00 R$' },
-  { id: '40739150061', date: '04.03.2026', time: '03:01:54', status: 'cancelled', method: 'USDT', amount: '-100.000,00 R$' },
+const PIX_KEY_TYPES = [
+  { value: 'cpf',    label: 'CPF' },
+  { value: 'email',  label: 'E-mail' },
+  { value: 'phone',  label: 'Telefone' },
+  { value: 'random', label: 'Chave aleatória' },
+  { value: 'cnpj',   label: 'CNPJ' },
 ]
+
+interface Withdrawal {
+  id: string
+  amount: number
+  pix_key_type: string
+  pix_key: string
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled'
+  admin_notes: string | null
+  created_at: string
+  processed_at: string | null
+}
 
 function FloatingInput({
   label, value, rightLabel, rightLabelColor = 'text-green-400', readOnly = false,
@@ -80,21 +96,25 @@ function Toggle({ label, defaultOn = true }: { label: string; defaultOn?: boolea
   )
 }
 
-const MOCK_TRANSACOES = [
-  { id: '40741052802', date: '20/05/2026, 14:04:05', status: 'pending',  tipo: 'Pagamento', sistema: 'USDT',         valor: '-R$200.000,00', negative: true  },
-  { id: '40739150181', date: '04/03/2026, 00:10:17', status: 'failed',   tipo: 'Pagamento', sistema: 'USDT',         valor: '-R$100.000,00', negative: true  },
-  { id: '40739150061', date: '04/03/2026, 00:01:54', status: 'failed',   tipo: 'Pagamento', sistema: 'USDT',         valor: '-R$100.000,00', negative: true  },
-  { id: '99920249',    date: '07/10/2025, 04:45:42', status: 'success',  tipo: 'Depósito',  sistema: 'USDT (TRC-20)',valor: '+R$50.000,00',  negative: false },
-  { id: '40735297787', date: '27/09/2025, 19:28:42', status: 'success',  tipo: 'Pagamento', sistema: 'USDT',         valor: '-R$213.764,00', negative: true  },
-  { id: '98719862',    date: '22/09/2025, 09:04:15', status: 'success',  tipo: 'Depósito',  sistema: 'USDT (TRC-20)',valor: '+R$50.000,00',  negative: false },
-  { id: '97033484',    date: '02/09/2025, 10:27:00', status: 'success',  tipo: 'Depósito',  sistema: 'USDT (TRC-20)',valor: '+R$50.000,00',  negative: false },
-  { id: '96462703',    date: '26/08/2025, 12:02:35', status: 'success',  tipo: 'Depósito',  sistema: 'USDT (TRC-20)',valor: '+R$50.000,00',  negative: false },
-  { id: '40734520540', date: '25/08/2025, 12:17:23', status: 'success',  tipo: 'Pagamento', sistema: 'USDT',         valor: '-R$216.176,00', negative: true  },
-  { id: '96080675',    date: '22/08/2025, 06:03:43', status: 'success',  tipo: 'Depósito',  sistema: 'USDT (TRC-20)',valor: '+R$50.000,00',  negative: false },
-  { id: '95724345',    date: '18/08/2025, 11:45:15', status: 'success',  tipo: 'Depósito',  sistema: 'USDT (TRC-20)',valor: '+R$50.000,00',  negative: false },
-  { id: '94903974',    date: '10/08/2025, 10:57:03', status: 'success',  tipo: 'Depósito',  sistema: 'USDT (TRC-20)',valor: '+R$50.000,00',  negative: false },
-  { id: '94518266',    date: '06/08/2025, 15:23:32', status: 'success',  tipo: 'Depósito',  sistema: 'USDT (TRC-20)',valor: '+R$30.000,00',  negative: false },
-]
+const TX_LABEL: Record<string, string> = {
+  TRADE_WIN:   'Operação vencida',
+  TRADE_LOSS:  'Operação perdida',
+  TRADE_DRAW:  'Empate',
+  EARLY_CLOSE: 'Saída antecipada',
+  DEPOSIT:     'Depósito',
+  WITHDRAWAL:  'Retirada',
+  DEMO_RESET:  'Reset demo',
+  BONUS:       'Bônus',
+}
+
+function fmtDate(iso: string) {
+  const d = new Date(iso)
+  return d.toLocaleDateString('pt-BR') + ', ' + d.toLocaleTimeString('pt-BR')
+}
+
+function fmtBRL(n: number) {
+  return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
 
 function StatusBadge({ status }: { status: string }) {
   if (status === 'pending') return (
@@ -122,85 +142,65 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function TransacoesTab() {
-  const [expandedId, setExpandedId] = useState<string | null>('40741052802')
-  const [page] = useState(1)
-  const totalPages = 6
+  const [transactions, setTransactions] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true)
+      const { data } = await supabase
+        .from('transactions')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(100)
+      setTransactions(data ?? [])
+      setLoading(false)
+    }
+    load()
+  }, [])
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Pagination top-right */}
-      <div className="flex items-center justify-end gap-2 px-6 py-3 flex-shrink-0">
-        <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#2a2e3b] text-xs text-[#8b8f9a] hover:text-white hover:border-white/30 transition-colors">
-          <ChevronLeft size={13} />
-          Anterior
-        </button>
-        <span className="text-xs text-[#8b8f9a] font-medium px-2">{page}/{totalPages}</span>
-        <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs text-white font-semibold transition-colors">
-          Próximo
-          <div className="w-4 h-4 rounded-full bg-white/20 flex items-center justify-center">
-            <ChevronRight size={10} className="text-white" />
-          </div>
-        </button>
-      </div>
-
       {/* Table */}
-      <div className="flex-1 overflow-y-auto px-6">
+      <div className="flex-1 overflow-y-auto px-6 pt-4">
         {/* Header */}
-        <div className="grid grid-cols-[180px_200px_220px_1fr_160px_140px] gap-4 pb-2 border-b border-[#2a2e3b] mb-1">
-          {['ID da Transação','Data e hora','Status','Tipo de transação','Sistema de pagamento','Valor'].map((h) => (
+        <div className="grid grid-cols-[260px_200px_220px_1fr_140px] gap-4 pb-2 border-b border-[#2a2e3b] mb-1">
+          {['ID da Transação','Data e hora','Status','Tipo','Valor'].map((h) => (
             <span key={h} className="text-xs text-[#8b8f9a] font-medium">{h}</span>
           ))}
         </div>
 
-        {/* Rows */}
-        {MOCK_TRANSACOES.map((tx) => (
-          <div key={tx.id} className="border-b border-[#2a2e3b]/50">
-            <button
-              onClick={() => setExpandedId(expandedId === tx.id ? null : tx.id)}
-              className="w-full grid grid-cols-[180px_200px_220px_1fr_160px_140px] gap-4 py-4 text-left hover:bg-white/[0.02] transition-colors"
-            >
-              <span className="text-xs text-white font-mono">{tx.id}</span>
-              <span className="text-xs text-[#8b8f9a]">{tx.date}</span>
-              <div className="flex items-center gap-2">
-                <StatusBadge status={tx.status} />
-                {tx.status === 'pending' && (
-                  <span className="px-2 py-0.5 rounded bg-[#2a2e3b] text-[10px] font-semibold text-white border border-[#3a3f50]">
-                    Cancelar
-                  </span>
-                )}
-              </div>
-              <span className="text-xs text-[#8b8f9a]">{tx.tipo}</span>
-              <span className="text-xs text-[#8b8f9a]">{tx.sistema}</span>
-              <span className={cn('text-xs font-semibold text-right', tx.negative ? 'text-red-400' : 'text-green-400')}>
-                {tx.valor}
-              </span>
-            </button>
-
-            {/* Expanded info for pending */}
-            {expandedId === tx.id && tx.status === 'pending' && (
-              <div className="pb-4 pl-[184px]">
-                <div className="bg-[#1a1e2e] border border-[#2a2e3b] rounded-xl px-4 py-3 max-w-[320px] text-xs text-[#ccc] leading-relaxed">
-                  A retirada está sendo processada no lado do operador financeiro. Aguarde - os fundos devem ser recebidos dentro de 48 horas.
-                </div>
-              </div>
-            )}
+        {loading && (
+          <div className="flex items-center justify-center py-16">
+            <Loader2 size={20} className="text-[#8b8f9a] animate-spin" />
           </div>
-        ))}
+        )}
+
+        {!loading && transactions.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-16 gap-2">
+            <span className="text-[#8b8f9a] text-sm">Nenhuma transação ainda</span>
+            <span className="text-[#8b8f9a] text-xs">Faça uma operação para ver o histórico aqui</span>
+          </div>
+        )}
+
+        {transactions.map((tx) => {
+          const positive = Number(tx.amount) >= 0
+          return (
+            <div key={tx.id} className="grid grid-cols-[260px_200px_220px_1fr_140px] gap-4 py-3 border-b border-[#2a2e3b]/40 hover:bg-white/[0.02] transition-colors items-center">
+              <span className="text-xs text-white font-mono truncate">{tx.id}</span>
+              <span className="text-xs text-[#8b8f9a]">{fmtDate(tx.created_at)}</span>
+              <StatusBadge status="success" />
+              <span className="text-xs text-[#8b8f9a]">{TX_LABEL[tx.type] ?? tx.type}</span>
+              <span className={cn('text-xs font-semibold text-right tabular-nums', positive ? 'text-green-400' : 'text-red-400')}>
+                {positive ? '+' : ''}R$ {fmtBRL(Math.abs(Number(tx.amount)))}
+              </span>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
 }
-
-const MOCK_OPERACOES = [
-  { payout: '94%', uuid: '9f829204-7597-42b5-9ef7-81085fab8776', openPrice: '25.178', openTime: '20/05/2026, 14:02:29', closePrice: '25.172', closeTime: '20/05/2026, 14:03:00', ip: '38.211.207.215', valor: '15000.00R$', lucro: '29100.00R$', dir: 'down' },
-  { payout: '94%', uuid: '912c332c-f728-4c7f-b94a-ce47ccb8e421', openPrice: '25.178', openTime: '20/05/2026, 14:02:29', closePrice: '25.172', closeTime: '20/05/2026, 14:03:00', ip: '38.211.207.215', valor: '15000.00R$', lucro: '29100.00R$', dir: 'down' },
-  { payout: '94%', uuid: '6fd150d5-3280-4861-9cd3-a96e80a316ac', openPrice: '25.178', openTime: '20/05/2026, 14:02:29', closePrice: '25.172', closeTime: '20/05/2026, 14:03:00', ip: '38.211.207.215', valor: '15000.00R$', lucro: '29100.00R$', dir: 'down' },
-  { payout: '94%', uuid: '2ffac17f-6e30-4f4f-a1f7-6d934c5b596b', openPrice: '25.185', openTime: '20/05/2026, 14:02:29', closePrice: '25.172', closeTime: '20/05/2026, 14:03:00', ip: '38.211.207.215', valor: '15000.00R$', lucro: '29100.00R$', dir: 'down' },
-  { payout: '94%', uuid: '2d71f660-76eb-4f1c-8f89-cd3ddbd305fd', openPrice: '25.185', openTime: '20/05/2026, 14:02:29', closePrice: '25.172', closeTime: '20/05/2026, 14:03:00', ip: '38.211.207.215', valor: '15000.00R$', lucro: '29100.00R$', dir: 'down' },
-  { payout: '94%', uuid: '1ffd39b2-91db-46cf-bd2e-b101f41b34ac', openPrice: '25.185', openTime: '20/05/2026, 14:02:29', closePrice: '25.172', closeTime: '20/05/2026, 14:03:00', ip: '38.211.207.215', valor: '15000.00R$', lucro: '29100.00R$', dir: 'down' },
-  { payout: '93%', uuid: 'db9ab997-223a-478f-9039-39781aadd843', openPrice: '25.137', openTime: '20/05/2026, 14:01:26', closePrice: '25.169', closeTime: '20/05/2026, 14:02:00', ip: '38.211.207.215', valor: '15000.00R$', lucro: '28950.00R$', dir: 'up' },
-  { payout: '93%', uuid: 'c2daef62-2433-426a-a356-d096513e5805', openPrice: '25.141', openTime: '20/05/2026, 14:01:27', closePrice: '25.169', closeTime: '20/05/2026, 14:02:00', ip: '38.211.207.215', valor: '15000.00R$', lucro: '28950.00R$', dir: 'up' },
-]
 
 function MiniChartIcon() {
   return (
@@ -211,9 +211,31 @@ function MiniChartIcon() {
 }
 
 function OperacoesTab() {
+  const store = useAuthStore()
   const [subTab, setSubTab] = useState<'historico' | 'pendentes'>('historico')
-  const [contaTipo, setContaTipo] = useState<'real' | 'demo'>('real')
+  const [contaTipo, setContaTipo] = useState<'REAL' | 'DEMO'>('REAL')
   const [contaDropOpen, setContaDropOpen] = useState(false)
+  const [operations, setOperations] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true)
+      const account = store.user?.accounts.find(a => a.type === contaTipo)
+      if (!account) { setOperations([]); setLoading(false); return }
+      const statusFilter = subTab === 'pendentes' ? ['OPEN'] : ['WON','LOST','DRAW']
+      const { data } = await supabase
+        .from('operations')
+        .select('*')
+        .eq('account_id', account.id)
+        .in('status', statusFilter)
+        .order('created_at', { ascending: false })
+        .limit(100)
+      setOperations(data ?? [])
+      setLoading(false)
+    }
+    load()
+  }, [subTab, contaTipo, store.user])
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -239,17 +261,8 @@ function OperacoesTab() {
         </button>
       </div>
 
-      {/* Filters + pagination */}
+      {/* Filters */}
       <div className="flex items-center gap-3 px-6 py-3 flex-shrink-0">
-        {/* Date range */}
-        <div className="relative border border-[#2a2e3b] rounded-lg px-3 pt-5 pb-2 bg-[#1a1e2e] min-w-[220px]">
-          <span className="absolute top-1.5 left-3 text-[10px] text-[#8b8f9a] font-medium">Intervalo de datas:</span>
-          <div className="flex items-center gap-2">
-            <Clock size={12} className="text-[#8b8f9a]" />
-            <span className="text-sm text-white">20.05.2025 - 20.05.2026</span>
-          </div>
-        </div>
-
         {/* Account type */}
         <div className="relative min-w-[160px]">
           <button
@@ -258,14 +271,14 @@ function OperacoesTab() {
           >
             <span className="absolute top-1.5 left-3 text-[10px] text-[#8b8f9a] font-medium">Tipo de Conta:</span>
             <div className="flex items-center justify-between gap-2">
-              <span className="text-sm text-white">{contaTipo === 'real' ? 'Conta real' : 'Conta demo'}</span>
+              <span className="text-sm text-white">{contaTipo === 'REAL' ? 'Conta real' : 'Conta demo'}</span>
               <ChevronDown size={13} className={cn('text-[#8b8f9a] transition-transform', contaDropOpen && 'rotate-180')} />
             </div>
           </button>
 
           {contaDropOpen && (
             <div className="absolute top-full left-0 right-0 mt-1 bg-[#1a1e2e] border border-[#2a2e3b] rounded-lg overflow-hidden shadow-xl z-50">
-              {(['real', 'demo'] as const).map((tipo) => (
+              {(['REAL', 'DEMO'] as const).map((tipo) => (
                 <button
                   key={tipo}
                   onClick={() => { setContaTipo(tipo); setContaDropOpen(false) }}
@@ -274,7 +287,7 @@ function OperacoesTab() {
                     contaTipo === tipo ? 'bg-white/10 text-white font-semibold' : 'text-[#8b8f9a] hover:bg-white/5 hover:text-white'
                   )}
                 >
-                  {tipo === 'real' ? 'Conta real' : 'Conta demo'}
+                  {tipo === 'REAL' ? 'Conta real' : 'Conta demo'}
                 </button>
               ))}
             </div>
@@ -310,224 +323,364 @@ function OperacoesTab() {
       {/* Table */}
       <div className="flex-1 overflow-y-auto px-6">
         {/* Header */}
-        <div className="grid grid-cols-[180px_280px_60px_160px_160px_160px_120px_120px] gap-3 py-2 border-b border-[#2a2e3b] mb-1">
-          {['Ativo','Informações','Gráfico','Preço de abertura','Preço de fechamento','IP','Valor','Lucro'].map((h) => (
+        <div className="grid grid-cols-[200px_260px_60px_160px_160px_120px_130px] gap-3 py-2 border-b border-[#2a2e3b] mb-1">
+          {['Ativo','Informações','Gráfico','Preço de abertura','Preço de fechamento','Status','Valor / Lucro'].map((h) => (
             <span key={h} className="text-xs text-[#8b8f9a] font-medium">{h}</span>
           ))}
         </div>
 
-        {/* Rows */}
-        {MOCK_OPERACOES.map((op, i) => (
-          <div key={i} className="grid grid-cols-[180px_280px_60px_160px_160px_160px_120px_120px] gap-3 py-3 border-b border-[#2a2e3b]/40 hover:bg-white/[0.02] transition-colors items-center">
-            {/* Ativo */}
-            <div className="flex items-center gap-2">
-              <img src="https://flagcdn.com/w40/us.png" alt="US" className="w-5 h-5 rounded-full object-cover flex-shrink-0" />
-              <span className="text-xs text-white leading-tight">Pfizer Inc (OTC)</span>
-            </div>
-
-            {/* Informações */}
-            <div>
-              <div className="text-xs font-semibold text-white mb-0.5">{op.payout}</div>
-              <div className="text-[10px] text-[#8b8f9a] font-mono break-all leading-tight">{op.uuid}</div>
-            </div>
-
-            {/* Gráfico */}
-            <div className="flex items-center justify-center">
-              <MiniChartIcon />
-            </div>
-
-            {/* Preço de abertura */}
-            <div>
-              <div className="text-xs text-white font-medium">{op.openPrice}</div>
-              <div className="text-[10px] text-[#8b8f9a] mt-0.5">{op.openTime}</div>
-            </div>
-
-            {/* Preço de fechamento */}
-            <div>
-              <div className="text-xs text-white font-medium">{op.closePrice}</div>
-              <div className="text-[10px] text-[#8b8f9a] mt-0.5">{op.closeTime}</div>
-            </div>
-
-            {/* IP */}
-            <div className="flex items-center gap-1.5">
-              <img src="https://flagcdn.com/w40/br.png" alt="BR" className="w-4 h-4 rounded-full object-cover flex-shrink-0" />
-              <span className="text-xs text-[#8b8f9a] font-mono">{op.ip}</span>
-            </div>
-
-            {/* Valor */}
-            <div className="flex items-center gap-1">
-              {op.dir === 'down' ? (
-                <svg width="10" height="10" viewBox="0 0 10 10" className="text-red-400 flex-shrink-0">
-                  <path d="M5 9L1 3h8L5 9z" fill="currentColor"/>
-                </svg>
-              ) : (
-                <svg width="10" height="10" viewBox="0 0 10 10" className="text-green-400 flex-shrink-0">
-                  <path d="M5 1l4 6H1L5 1z" fill="currentColor"/>
-                </svg>
-              )}
-              <span className={cn('text-xs font-semibold', op.dir === 'down' ? 'text-red-400' : 'text-green-400')}>
-                {op.valor}
-              </span>
-            </div>
-
-            {/* Lucro */}
-            <span className="text-xs font-semibold text-green-400">{op.lucro}</span>
+        {loading && (
+          <div className="flex items-center justify-center py-16">
+            <Loader2 size={20} className="text-[#8b8f9a] animate-spin" />
           </div>
-        ))}
+        )}
+
+        {!loading && operations.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-16 gap-2">
+            <span className="text-[#8b8f9a] text-sm">Nenhuma operação encontrada</span>
+          </div>
+        )}
+
+        {operations.map((op) => {
+          const isCall = op.direction === 'CALL'
+          const won = op.status === 'WON'
+          const lost = op.status === 'LOST'
+          const open = op.status === 'OPEN'
+          const profit = Number(op.profit ?? 0)
+          return (
+            <div key={op.id} className="grid grid-cols-[200px_260px_60px_160px_160px_120px_130px] gap-3 py-3 border-b border-[#2a2e3b]/40 hover:bg-white/[0.02] transition-colors items-center">
+              {/* Ativo */}
+              <div className="flex items-center gap-2">
+                <div className={cn('w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 text-[9px] font-bold text-white', isCall ? 'bg-green-600' : 'bg-red-600')}>
+                  {isCall ? '▲' : '▼'}
+                </div>
+                <span className="text-xs text-white font-medium leading-tight">{op.asset_symbol}</span>
+              </div>
+
+              {/* Informações */}
+              <div>
+                <div className="text-xs font-semibold text-white mb-0.5">{op.payout_pct}%</div>
+                <div className="text-[10px] text-[#8b8f9a] font-mono truncate leading-tight">{op.id}</div>
+              </div>
+
+              {/* Gráfico */}
+              <div className="flex items-center justify-center">
+                <MiniChartIcon />
+              </div>
+
+              {/* Preço de abertura */}
+              <div>
+                <div className="text-xs text-white font-medium font-mono">{Number(op.entry_price).toFixed(5)}</div>
+                <div className="text-[10px] text-[#8b8f9a] mt-0.5">{fmtDate(op.created_at)}</div>
+              </div>
+
+              {/* Preço de fechamento */}
+              <div>
+                {op.exit_price
+                  ? <>
+                      <div className="text-xs text-white font-medium font-mono">{Number(op.exit_price).toFixed(5)}</div>
+                      <div className="text-[10px] text-[#8b8f9a] mt-0.5">{op.closed_at ? fmtDate(op.closed_at) : '—'}</div>
+                    </>
+                  : <span className="text-xs text-yellow-400 font-semibold">Em aberto</span>
+                }
+              </div>
+
+              {/* Status */}
+              <div>
+                {open && <span className="text-xs text-yellow-400 font-semibold">Aberta</span>}
+                {won  && <span className="text-xs text-green-400 font-semibold">Ganhou</span>}
+                {lost && <span className="text-xs text-red-400 font-semibold">Perdeu</span>}
+                {op.status === 'DRAW' && <span className="text-xs text-[#8b8f9a] font-semibold">Empate</span>}
+              </div>
+
+              {/* Valor / Lucro */}
+              <div className="text-right">
+                <div className="text-xs text-[#8b8f9a]">R$ {fmtBRL(Number(op.amount))}</div>
+                {!open && (
+                  <div className={cn('text-xs font-bold tabular-nums', won ? 'text-green-400' : lost ? 'text-red-400' : 'text-[#8b8f9a]')}>
+                    {won ? '+' : ''}R$ {fmtBRL(Math.abs(profit))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
 }
 
+function WithdrawalStatusBadge({ status }: { status: Withdrawal['status'] }) {
+  if (status === 'pending')   return <span className="flex items-center gap-1.5 text-xs text-yellow-400"><div className="w-3 h-3 rounded-full border-2 border-yellow-400" />Aguardando aprovação</span>
+  if (status === 'approved')  return <span className="flex items-center gap-1.5 text-xs text-green-400"><CheckCheck size={13} />Aprovada</span>
+  if (status === 'rejected')  return <span className="flex items-center gap-1.5 text-xs text-red-400"><Ban size={13} />Rejeitada</span>
+  if (status === 'cancelled') return <span className="flex items-center gap-1.5 text-xs text-[#8b8f9a]"><X size={13} />Cancelada</span>
+  return null
+}
+
 function RetiradaTab() {
-  const [expandedId, setExpandedId] = useState<string | null>('40741052802')
+  const user    = useAuthStore(s => s.user)
+  const account = useAuthStore(useCurrentAccount)
+
+  const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([])
+  const [loadingList, setLoadingList] = useState(true)
+  const [expandedId, setExpandedId]   = useState<string | null>(null)
+
+  // form
+  const [pixKeyType, setPixKeyType] = useState('cpf')
+  const [pixKey, setPixKey]         = useState('')
+  const [amount, setAmount]         = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [formError, setFormError]   = useState<string | null>(null)
+  const [cancellingId, setCancellingId] = useState<string | null>(null)
+
+  const realAccount = account?.type === 'REAL' ? account : user?.accounts.find(a => a.type === 'REAL')
+  const balance = realAccount ? parseFloat(realAccount.balance) : 0
+  const hasPending = withdrawals.some(w => w.status === 'pending')
+
+  const loadWithdrawals = useCallback(async () => {
+    if (!user) return
+    setLoadingList(true)
+    const { data } = await supabase
+      .from('withdrawals')
+      .select('id,amount,pix_key_type,pix_key,status,admin_notes,created_at,processed_at')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(20)
+    setWithdrawals((data ?? []) as Withdrawal[])
+    setLoadingList(false)
+  }, [user])
+
+  useEffect(() => { loadWithdrawals() }, [loadWithdrawals])
+
+  const handleSubmit = async () => {
+    const val = parseFloat(amount.replace(',', '.'))
+    if (isNaN(val) || val < 50) { setFormError('Valor mínimo: R$50,00'); return }
+    if (val > balance)           { setFormError('Saldo insuficiente'); return }
+    if (!pixKey.trim())          { setFormError('Informe a chave PIX'); return }
+    if (!realAccount)            { setFormError('Conta REAL não encontrada'); return }
+    if (hasPending)              { setFormError('Você já tem uma retirada pendente. Aguarde a aprovação.'); return }
+
+    setSubmitting(true)
+    setFormError(null)
+    const { error } = await supabase.rpc('request_withdrawal', {
+      p_account_id:   realAccount.id,
+      p_amount:       val,
+      p_pix_key_type: pixKeyType,
+      p_pix_key:      pixKey.trim(),
+    })
+    setSubmitting(false)
+
+    if (error) { setFormError(error.message); return }
+    setAmount('')
+    setPixKey('')
+    await loadWithdrawals()
+    await useAuthStore.getState().refreshAccounts()
+  }
+
+  const handleCancel = async (id: string) => {
+    setCancellingId(id)
+    await supabase.rpc('cancel_withdrawal', { p_withdrawal_id: id })
+    setCancellingId(null)
+    await loadWithdrawals()
+    await useAuthStore.getState().refreshAccounts()
+  }
 
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="flex min-h-full">
 
-        {/* Left — Conta */}
+        {/* Left — saldo */}
         <div className="w-[260px] flex-shrink-0 px-6 py-6 border-r border-[#2a2e3b]">
-          <p className="text-sm font-semibold text-white mb-5">Conta:</p>
+          <p className="text-sm font-semibold text-white mb-5">Conta REAL:</p>
           <div className="mb-4">
             <div className="text-xs text-[#8b8f9a] mb-1">Na conta:</div>
-            <div className="text-2xl font-bold text-white">108.289,70 R$</div>
+            <div className="text-2xl font-bold text-white">R$ {fmtBRL(balance)}</div>
           </div>
           <div className="border-t border-dashed border-[#2a2e3b] my-4" />
           <div>
             <div className="text-xs text-[#8b8f9a] mb-1">Disponível para retirada:</div>
-            <div className="text-2xl font-bold text-white">108.289,70 R$</div>
+            <div className="text-2xl font-bold text-white">R$ {fmtBRL(balance)}</div>
           </div>
-        </div>
-
-        {/* Middle — Retirada + histórico */}
-        <div className="flex-1 px-6 py-6 border-r border-[#2a2e3b] flex flex-col">
-          <p className="text-sm font-semibold text-white mb-4">Retirada:</p>
-
-          {/* Warning box */}
-          <div className="flex items-start gap-3 bg-orange-500/10 border border-orange-500/30 rounded-xl px-4 py-3 mb-6">
-            <AlertCircle size={18} className="text-orange-400 flex-shrink-0 mt-0.5" />
-            <p className="text-sm text-[#ccc] leading-relaxed">
-              Desculpe, você atingiu o limite de retiradas pendentes. Aguarde o processamento de sua solicitação de retirada ou cancele as retiradas pendentes para prosseguir.
-            </p>
-          </div>
-
-          <div className="border-t border-dashed border-[#2a2e3b] mb-5" />
-
-          {/* Recent orders header */}
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-sm font-semibold text-white">Alguns de seus pedidos recentes:</p>
-            <button className="flex items-center gap-1.5 text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors">
-              Histórico financeiro
-              <span className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center">
-                <ChevronRight size={11} className="text-white" />
-              </span>
-            </button>
-          </div>
-
-          {/* Withdrawals list */}
-          <div className="flex flex-col gap-0">
-            {MOCK_WITHDRAWALS.map((w) => (
-              <div key={w.id}>
-                <button
-                  onClick={() => setExpandedId(expandedId === w.id ? null : w.id)}
-                  className="w-full grid grid-cols-[1fr_160px_80px_140px] gap-4 py-3 text-left hover:bg-white/3 transition-colors border-b border-[#2a2e3b]/50"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-[#8b8f9a] font-mono">{w.id}</span>
-                    <span className="text-xs text-[#8b8f9a]">{w.date}</span>
-                    <span className="text-xs text-[#8b8f9a]">{w.time}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {w.status === 'pending' ? (
-                      <>
-                        <div className="w-4 h-4 rounded-full border-2 border-[#8b8f9a] flex-shrink-0" />
-                        <span className="text-xs text-[#8b8f9a]">Aguardando confirmação</span>
-                      </>
-                    ) : (
-                      <>
-                        <X size={14} className="text-red-400 flex-shrink-0" />
-                        <span className="text-xs text-[#8b8f9a]">Cancelado</span>
-                      </>
-                    )}
-                  </div>
-                  <span className="text-xs text-[#8b8f9a]">{w.method}</span>
-                  <span className="text-xs font-semibold text-red-400 text-right">{w.amount}</span>
-                </button>
-
-                {/* Expanded tooltip for pending */}
-                {expandedId === w.id && w.status === 'pending' && (
-                  <div className="ml-4 mb-3">
-                    <div className="bg-[#1a1e2e] border border-[#2a2e3b] rounded-xl px-4 py-3 max-w-[320px] mt-2">
-                      <p className="text-xs text-[#ccc] leading-relaxed mb-3">
-                        A retirada está sendo processada no lado do operador financeiro. Aguarde - os fundos devem ser recebidos dentro de 48 horas.
-                      </p>
-                      <button className="px-4 py-1.5 rounded-lg border border-[#3a3f50] text-xs font-semibold text-white hover:bg-white/5 transition-colors">
-                        Cancelar
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-
-          {/* Footer info */}
-          <div className="mt-auto pt-6 flex flex-col gap-1.5">
+          <div className="mt-6 flex flex-col gap-1.5">
             <div className="flex items-center gap-2">
               <Landmark size={13} className="text-green-400" />
-              <span className="text-xs text-[#8b8f9a]">Valor mínimo do depósito: <span className="text-green-400 font-semibold">R$50</span></span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Landmark size={13} className="text-green-400" />
-              <span className="text-xs text-[#8b8f9a]">Valor mínimo de retirada: <span className="text-green-400 font-semibold">R$50</span></span>
+              <span className="text-xs text-[#8b8f9a]">Mínimo: <span className="text-green-400 font-semibold">R$50</span></span>
             </div>
             <div className="flex items-center gap-2">
               <Zap size={13} className="text-orange-400" />
-              <span className="text-xs text-[#8b8f9a]">Retirada rápida de sua conta</span>
+              <span className="text-xs text-[#8b8f9a]">Aprovação em até 48h</span>
             </div>
           </div>
+        </div>
 
-          {/* Security badges */}
-          <div className="flex items-center gap-4 mt-5 pt-4 border-t border-[#2a2e3b]">
-            {['Verified by VISA', 'SECURE PAYMENT', 'MasterCard SecureCode', '3D Secure', 'SSL ENCRYPTION'].map((b) => (
-              <div key={b} className="flex flex-col items-center gap-0.5 opacity-40">
-                <div className="w-8 h-8 rounded bg-[#2a2e3b]" />
-                <span className="text-[8px] text-[#8b8f9a] text-center leading-tight max-w-[48px]">{b}</span>
+        {/* Middle — formulário + histórico */}
+        <div className="flex-1 px-6 py-6 border-r border-[#2a2e3b] flex flex-col gap-6">
+
+          {/* Aviso se já tem pendente */}
+          {hasPending && (
+            <div className="flex items-start gap-3 bg-orange-500/10 border border-orange-500/30 rounded-xl px-4 py-3">
+              <AlertCircle size={16} className="text-orange-400 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-[#ccc] leading-relaxed">
+                Você possui uma retirada aguardando aprovação. Aguarde o processamento antes de solicitar uma nova.
+              </p>
+            </div>
+          )}
+
+          {/* Formulário */}
+          {!hasPending && (
+            <div className="flex flex-col gap-3">
+              <p className="text-sm font-semibold text-white">Solicitar retirada via PIX:</p>
+
+              {/* Tipo de chave */}
+              <div>
+                <label className="text-[10px] font-bold text-[#8b8f9a] tracking-widest block mb-1.5">TIPO DE CHAVE PIX</label>
+                <div className="flex gap-2 flex-wrap">
+                  {PIX_KEY_TYPES.map(t => (
+                    <button
+                      key={t.value}
+                      onClick={() => setPixKeyType(t.value)}
+                      className={cn(
+                        'px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors',
+                        pixKeyType === t.value
+                          ? 'bg-blue-600 border-blue-500 text-white'
+                          : 'bg-[#1a1e2e] border-[#2a2e3b] text-[#8b8f9a] hover:text-white'
+                      )}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
               </div>
-            ))}
+
+              {/* Chave PIX */}
+              <div className="border border-[#2a2e3b] rounded-xl px-4 py-3 bg-[#1a1e2e] focus-within:border-blue-500/50 transition-colors">
+                <div className="text-[10px] font-bold text-[#8b8f9a] tracking-widest mb-1">CHAVE PIX</div>
+                <input
+                  type="text"
+                  value={pixKey}
+                  onChange={e => { setPixKey(e.target.value); setFormError(null) }}
+                  placeholder={pixKeyType === 'cpf' ? '000.000.000-00' : pixKeyType === 'email' ? 'seu@email.com' : pixKeyType === 'phone' ? '+55 11 9 0000-0000' : 'Cole a chave aqui'}
+                  className="w-full bg-transparent text-sm text-white outline-none placeholder-[#3a3f50]"
+                />
+              </div>
+
+              {/* Valor */}
+              <div className="border border-[#2a2e3b] rounded-xl px-4 py-3 bg-[#1a1e2e] focus-within:border-blue-500/50 transition-colors flex items-center gap-2">
+                <span className="text-sm font-semibold text-[#8b8f9a]">R$</span>
+                <input
+                  type="number"
+                  min={50}
+                  step={1}
+                  value={amount}
+                  onChange={e => { setAmount(e.target.value); setFormError(null) }}
+                  placeholder="0,00"
+                  className="flex-1 bg-transparent text-sm font-bold text-white outline-none placeholder-[#3a3f50]"
+                />
+                <button
+                  onClick={() => setAmount(String(Math.floor(balance)))}
+                  className="text-[10px] font-bold text-blue-400 hover:text-blue-300"
+                >
+                  MAX
+                </button>
+              </div>
+
+              {formError && (
+                <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/30 rounded-xl px-3 py-2">
+                  <AlertCircle size={13} className="text-red-400 flex-shrink-0" />
+                  <span className="text-xs text-red-400">{formError}</span>
+                </div>
+              )}
+
+              <button
+                onClick={handleSubmit}
+                disabled={submitting || !amount || !pixKey}
+                className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed font-bold text-white text-sm transition-colors flex items-center justify-center gap-2"
+              >
+                {submitting && <Loader2 size={15} className="animate-spin" />}
+                {submitting ? 'Enviando…' : 'Solicitar retirada'}
+              </button>
+            </div>
+          )}
+
+          <div className="border-t border-dashed border-[#2a2e3b]" />
+
+          {/* Histórico */}
+          <div>
+            <p className="text-sm font-semibold text-white mb-3">Pedidos recentes:</p>
+            {loadingList ? (
+              <div className="flex items-center gap-2 text-[#8b8f9a]">
+                <Loader2 size={14} className="animate-spin" />
+                <span className="text-xs">Carregando…</span>
+              </div>
+            ) : withdrawals.length === 0 ? (
+              <p className="text-xs text-[#8b8f9a]">Nenhuma retirada solicitada ainda.</p>
+            ) : (
+              <div className="flex flex-col">
+                {withdrawals.map(w => (
+                  <div key={w.id}>
+                    <button
+                      onClick={() => setExpandedId(expandedId === w.id ? null : w.id)}
+                      className="w-full flex items-center gap-4 py-3 text-left hover:bg-white/3 transition-colors border-b border-[#2a2e3b]/50"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span className="text-xs text-[#8b8f9a] font-mono">{w.id.slice(0, 8).toUpperCase()}</span>
+                          <span className="text-[10px] text-[#8b8f9a]">{fmtDate(w.created_at)}</span>
+                        </div>
+                        <WithdrawalStatusBadge status={w.status} />
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <div className="text-sm font-bold text-red-400">-R$ {fmtBRL(w.amount)}</div>
+                        <div className="text-[10px] text-[#8b8f9a]">PIX · {PIX_KEY_TYPES.find(t => t.value === w.pix_key_type)?.label}</div>
+                      </div>
+                    </button>
+
+                    {expandedId === w.id && (
+                      <div className="bg-[#1a1e2e] border border-[#2a2e3b] rounded-xl px-4 py-3 mx-2 mb-2 mt-1">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-[10px] text-[#8b8f9a]">Chave PIX:</span>
+                          <span className="text-xs text-white font-mono">{w.pix_key}</span>
+                        </div>
+                        {w.admin_notes && (
+                          <p className="text-xs text-[#ccc] mb-2">{w.admin_notes}</p>
+                        )}
+                        {w.status === 'pending' && (
+                          <p className="text-xs text-[#8b8f9a] mb-3">
+                            Sua solicitação está aguardando aprovação do administrador. Prazo: até 48h úteis.
+                          </p>
+                        )}
+                        {w.status === 'pending' && (
+                          <button
+                            onClick={() => handleCancel(w.id)}
+                            disabled={cancellingId === w.id}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#3a3f50] text-xs font-semibold text-white hover:bg-white/5 transition-colors disabled:opacity-50"
+                          >
+                            {cancellingId === w.id ? <Loader2 size={11} className="animate-spin" /> : <X size={11} />}
+                            Cancelar solicitação
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
         {/* Right — FAQ */}
-        <div className="w-[420px] flex-shrink-0 px-6 py-6">
+        <div className="w-[380px] flex-shrink-0 px-6 py-6">
           <div className="flex items-center justify-between mb-4">
             <p className="text-sm font-semibold text-white">FAQ:</p>
-            <button className="flex items-center gap-1.5 text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors">
-              Confira todas as perguntas frequentes
-              <span className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center">
-                <ChevronRight size={11} className="text-white" />
-              </span>
-            </button>
           </div>
-
-          <div className="grid grid-cols-2 gap-x-6">
-            <div className="flex flex-col gap-3">
-              {FAQ_RETIRADA.map((row, i) => row[0] && (
-                <button key={i} className="flex items-start gap-2 text-left group">
-                  <ChevronDown size={13} className="text-[#8b8f9a] mt-0.5 flex-shrink-0 group-hover:text-white transition-colors" />
-                  <span className="text-xs text-[#8b8f9a] group-hover:text-white transition-colors leading-relaxed">{row[0]}</span>
-                </button>
-              ))}
-            </div>
-            <div className="flex flex-col gap-3">
-              {FAQ_RETIRADA.map((row, i) => row[1] && (
-                <button key={i} className="flex items-start gap-2 text-left group">
-                  <ChevronDown size={13} className="text-[#8b8f9a] mt-0.5 flex-shrink-0 group-hover:text-white transition-colors" />
-                  <span className="text-xs text-[#8b8f9a] group-hover:text-white transition-colors leading-relaxed">{row[1]}</span>
-                </button>
-              ))}
-            </div>
+          <div className="flex flex-col gap-3">
+            {FAQ_RETIRADA.flat().filter(Boolean).map((q, i) => (
+              <button key={i} className="flex items-start gap-2 text-left group">
+                <ChevronDown size={13} className="text-[#8b8f9a] mt-0.5 flex-shrink-0 group-hover:text-white transition-colors" />
+                <span className="text-xs text-[#8b8f9a] group-hover:text-white transition-colors leading-relaxed">{q}</span>
+              </button>
+            ))}
           </div>
         </div>
 

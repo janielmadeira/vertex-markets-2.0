@@ -1,11 +1,12 @@
 'use client'
 
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Pencil, ZoomIn, ZoomOut, Crosshair, ChevronDown, Eye, Pen, X, Activity, Bell } from 'lucide-react'
 import { generateMockCandles, getOTCPrice, getAssetDecimals, type Asset, type Candle, type ActiveTrade } from '@/lib/mockData'
 import { REAL_ASSETS, tfToBinanceInterval } from '@/lib/marketSymbols'
 import { cn } from '@/lib/utils'
 import { DrawingsPanel } from './DrawingsPanel'
+import { DrawingSettingsPanel } from './DrawingSettingsPanel'
 import { IndicadoresPanel } from './IndicadoresPanel'
 import { BBSettingsPanel, type BBSettings, BB_DEFAULTS } from './BBSettingsPanel'
 import { MASettingsPanel, type MASettings, type MAType, MA_DEFAULTS } from './MASettingsPanel'
@@ -14,6 +15,26 @@ import { RSISettingsPanel, type RSISettings, RSI_DEFAULTS } from './RSISettingsP
 
 type ChartTheme = 'diurno' | 'crepusculo' | 'noite'
 type ChartType = 'velas' | 'area' | 'barras' | 'heiken-ashi'
+
+// ── Drawing tools ────────────────────────────────────────────────────────────
+const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0]
+const FIB_COLORS = ['#ef5350', '#f7931a', '#f1c40f', '#26a69a', '#42a5f5', '#ab47bc', '#ef5350']
+const DRAW_PALETTE = ['#2196f3', '#26a69a', '#ef5350', '#f7931a', '#ab47bc', '#f1c40f']
+let _drawColorIdx = 0
+function nextDrawColor() { return DRAW_PALETTE[(_drawColorIdx++) % DRAW_PALETTE.length] }
+
+type DrawingStyle = 'solid' | 'dashed'
+type Drawing =
+  | { id: string; type: 'hline'; price: number; color: string; style?: DrawingStyle }
+  | { id: string; type: 'vline'; time: number; color: string; style?: DrawingStyle }
+  | { id: string; type: 'trendline'; p1: { time: number; price: number }; p2: { time: number; price: number }; color: string; style?: DrawingStyle }
+  | { id: string; type: 'fib'; p1: { time: number; price: number }; p2: { time: number; price: number }; color: string; style?: DrawingStyle }
+
+type DrawingPx =
+  | { id: string; type: 'hline'; y: number; price: number; color: string }
+  | { id: string; type: 'vline'; x: number; color: string }
+  | { id: string; type: 'trendline'; x1: number; y1: number; x2: number; y2: number; color: string }
+  | { id: string; type: 'fib'; x1: number; y1: number; x2: number; y2: number; color: string; levels: Array<{ ratio: number; y: number; price: number }> }
 
 const THEME_COLORS: Record<ChartTheme, {
   bg: string; text: string; grid: string; border: string; crosshair: string; labelBg: string
@@ -262,6 +283,23 @@ function TradeTimer({ expiryTime, x, y, color }: { expiryTime: number; x: number
   )
 }
 
+function TradeExpiryLabel({ expiryTime, color }: { expiryTime: number; color: string }) {
+  const nowBRT = () => Math.floor(Date.now() / 1000) + BRT_OFFSET_CHART
+  const [remaining, setRemaining] = React.useState(Math.max(0, expiryTime - nowBRT()))
+  React.useEffect(() => {
+    const t = setInterval(() => setRemaining(Math.max(0, expiryTime - nowBRT())), 200)
+    return () => clearInterval(t)
+  }, [expiryTime])
+  const m = Math.floor(remaining / 60).toString().padStart(2, '0')
+  const s = (remaining % 60).toString().padStart(2, '0')
+  return (
+    <span className="text-[10px] font-semibold whitespace-nowrap px-1.5 py-0.5 rounded font-mono"
+      style={{ color, backgroundColor: '#151822cc', border: `1px solid ${color}50` }}>
+      Fechamento da negociação {m}:{s}
+    </span>
+  )
+}
+
 // Cache de candles históricos por "assetId:tfSeconds" — evita regenerar ao voltar para um par.
 // Chave expira após 5 minutos para absorver novos candles sem crescer indefinidamente.
 const candleCache = new Map<string, { candles: import('@/lib/mockData').Candle[]; ts: number }>()
@@ -292,6 +330,27 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
   const [candleTimerY, setCandleTimerY] = useState<number | null>(null)
   const [candleTimerX, setCandleTimerX] = useState<number | null>(null)
   const [drawingsOpen, setDrawingsOpen] = useState(false)
+  const [activeTool, setActiveTool] = useState<string | null>(null)
+  const [drawings, setDrawings] = useState<Drawing[]>([])
+  const drawingsRef = useRef<Drawing[]>([])
+  useEffect(() => { drawingsRef.current = drawings }, [drawings])
+  const [pendingPoint, setPendingPoint] = useState<{ price: number; time: number } | null>(null)
+  const pendingPointRef = useRef<{ price: number; time: number } | null>(null)
+  useEffect(() => { pendingPointRef.current = pendingPoint }, [pendingPoint])
+  const activeToolRef = useRef<string | null>(null)
+  useEffect(() => { activeToolRef.current = activeTool }, [activeTool])
+  const [drawingPixels, setDrawingPixels] = useState<DrawingPx[]>([])
+  const [mousePx, setMousePx] = useState<{ x: number; y: number } | null>(null)
+  const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null)
+  const selectedDrawingIdRef = useRef<string | null>(null)
+  useEffect(() => { selectedDrawingIdRef.current = selectedDrawingId }, [selectedDrawingId])
+  const draggingRef = useRef<{
+    id: string
+    handle: 'body' | 'p1' | 'p2'
+    startClientX: number
+    startClientY: number
+    origDrawing: Drawing
+  } | null>(null)
   const [indicadoresOpen, setIndicadoresOpen] = useState(false)
   const [chartType, setChartType] = useState<ChartType>('velas')
   const [chartTypeOpen, setChartTypeOpen] = useState(false)
@@ -458,6 +517,60 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
       if (tradesPosIntervalRef.current) clearInterval(tradesPosIntervalRef.current)
     }
   }, [activeTrades])
+
+  // ── Drawing pixels: convert stored price/time to pixel coords ────────────
+  useEffect(() => {
+    const iv = setInterval(() => {
+      if (!chartRef.current || !seriesRef.current) return
+      const ts = chartRef.current.timeScale()
+      const pixels: DrawingPx[] = []
+      for (const d of drawingsRef.current) {
+        if (d.type === 'hline') {
+          const y = seriesRef.current.priceToCoordinate(d.price)
+          if (y != null) pixels.push({ id: d.id, type: 'hline', y, price: d.price, color: d.color })
+        } else if (d.type === 'vline') {
+          const x = ts.timeToCoordinate(d.time)
+          if (x != null) pixels.push({ id: d.id, type: 'vline', x, color: d.color })
+        } else if (d.type === 'trendline') {
+          const x1 = ts.timeToCoordinate(d.p1.time) ?? 0
+          const y1 = seriesRef.current.priceToCoordinate(d.p1.price) ?? 0
+          const x2 = ts.timeToCoordinate(d.p2.time) ?? 0
+          const y2 = seriesRef.current.priceToCoordinate(d.p2.price) ?? 0
+          pixels.push({ id: d.id, type: 'trendline', x1, y1, x2, y2, color: d.color })
+        } else if (d.type === 'fib') {
+          const x1 = ts.timeToCoordinate(d.p1.time) ?? 0
+          const y1 = seriesRef.current.priceToCoordinate(d.p1.price) ?? 0
+          const x2 = ts.timeToCoordinate(d.p2.time) ?? 0
+          const y2 = seriesRef.current.priceToCoordinate(d.p2.price) ?? 0
+          const levels = FIB_LEVELS.map((r, i) => {
+            const price = d.p2.price + (d.p1.price - d.p2.price) * r
+            const y = seriesRef.current!.priceToCoordinate(price) ?? 0
+            return { ratio: r, y, price }
+          })
+          pixels.push({ id: d.id, type: 'fib', x1, y1, x2, y2, color: d.color, levels })
+        }
+      }
+      setDrawingPixels(pixels)
+    }, 100)
+    return () => clearInterval(iv)
+  }, [])
+
+  // Escape cancels active drawing tool / deselects drawing; Delete removes selected drawing
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setActiveTool(null); setPendingPoint(null); setMousePx(null)
+        setSelectedDrawingId(null)
+      }
+      if (e.key === 'Delete' && selectedDrawingIdRef.current) {
+        const id = selectedDrawingIdRef.current
+        setDrawings(prev => prev.filter(d => d.id !== id))
+        setSelectedDrawingId(null)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
 
   useEffect(() => {
     let chart: any = null
@@ -953,6 +1066,88 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
 
   const fmt = (v: number) => v.toFixed(getAssetDecimals(asset))
 
+  // ── Select + drag drawings ────────────────────────────────────────────────
+  const startDrawingDrag = useCallback((
+    id: string,
+    handle: 'body' | 'p1' | 'p2',
+    e: React.MouseEvent,
+    origDrawing: Drawing,
+  ) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setSelectedDrawingId(id)
+    setDrawingsOpen(true)
+    draggingRef.current = { id, handle, startClientX: e.clientX, startClientY: e.clientY, origDrawing }
+
+    const onMove = (me: MouseEvent) => {
+      const drag = draggingRef.current
+      if (!drag || !chartRef.current || !seriesRef.current || !chartContainerRef.current) return
+      const ts = chartRef.current.timeScale()
+      const dx = me.clientX - drag.startClientX
+      const dy = me.clientY - drag.startClientY
+      const orig = drag.origDrawing
+
+      setDrawings(prev => prev.map(item => {
+        if (item.id !== drag.id) return item
+
+        if (item.type === 'hline') {
+          const origY = seriesRef.current!.priceToCoordinate((orig as typeof item).price)
+          if (origY == null) return item
+          const newPrice = seriesRef.current!.coordinateToPrice(origY + dy) as number | null
+          return newPrice != null ? { ...item, price: newPrice } : item
+        }
+
+        if (item.type === 'vline') {
+          const origX = ts.timeToCoordinate((orig as typeof item).time)
+          if (origX == null) return item
+          const newTime = ts.coordinateToTime(origX + dx) as number | null
+          return newTime != null ? { ...item, time: newTime } : item
+        }
+
+        if (item.type === 'trendline' || item.type === 'fib') {
+          const o = orig as Extract<Drawing, { type: 'trendline' | 'fib' }>
+          const getNew = (p: { time: number; price: number }, ddx: number, ddy: number) => {
+            const ox = ts.timeToCoordinate(p.time)
+            const oy = seriesRef.current!.priceToCoordinate(p.price)
+            if (ox == null || oy == null) return p
+            const nt = ts.coordinateToTime(ox + ddx) as number | null
+            const np = seriesRef.current!.coordinateToPrice(oy + ddy) as number | null
+            return nt != null && np != null ? { time: nt, price: np } : p
+          }
+
+          if (drag.handle === 'p1') return { ...item, p1: getNew(o.p1, dx, dy) }
+          if (drag.handle === 'p2') return { ...item, p2: getNew(o.p2, dx, dy) }
+          // body: move both points
+          return { ...item, p1: getNew(o.p1, dx, dy), p2: getNew(o.p2, dx, dy) }
+        }
+
+        return item
+      }))
+    }
+
+    const onUp = () => {
+      draggingRef.current = null
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [])
+
+  const updateDrawingColor = useCallback((id: string, color: string) => {
+    setDrawings(prev => prev.map(d => d.id === id ? { ...d, color } : d))
+  }, [])
+
+  const updateDrawingStyle = useCallback((id: string, style: DrawingStyle) => {
+    setDrawings(prev => prev.map(d => d.id === id ? { ...d, style } : d))
+  }, [])
+
+  const deleteDrawing = useCallback((id: string) => {
+    setDrawings(prev => prev.filter(d => d.id !== id))
+    setSelectedDrawingId(null)
+  }, [])
+
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-[#151822] relative overflow-hidden" onClick={() => { setTfOpen(false); setChartTypeOpen(false) }} onKeyDown={() => {}}>
 
@@ -1067,8 +1262,31 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
         </div>
       )}
 
-      {/* Drawings panel overlay */}
-      {drawingsOpen && <DrawingsPanel onClose={() => setDrawingsOpen(false)} />}
+      {/* Drawings panel / settings overlay */}
+      {drawingsOpen && (() => {
+        const selDraw = selectedDrawingId ? drawings.find(d => d.id === selectedDrawingId) : null
+        if (selDraw) {
+          return (
+            <DrawingSettingsPanel
+              drawingType={selDraw.type}
+              color={selDraw.color}
+              style={selDraw.style ?? 'dashed'}
+              onColorChange={c => updateDrawingColor(selDraw.id, c)}
+              onStyleChange={s => updateDrawingStyle(selDraw.id, s)}
+              onDelete={() => { deleteDrawing(selDraw.id); setDrawingsOpen(false) }}
+              onBack={() => setSelectedDrawingId(null)}
+            />
+          )
+        }
+        return (
+          <DrawingsPanel
+            onClose={() => setDrawingsOpen(false)}
+            activeTool={activeTool}
+            onSelectTool={setActiveTool}
+            onClearAll={() => { setDrawings([]); setDrawingPixels([]); setSelectedDrawingId(null) }}
+          />
+        )
+      })()}
 
       {/* Indicators panel overlay */}
       {indicadoresOpen && !bbEditOpen && !maEditOpen && !macdEditOpen && !rsiEditOpen && (
@@ -1140,6 +1358,39 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
 
         return (
           <React.Fragment key={trade.id}>
+            {/* Linha vertical tracejada — Abertura da negociação */}
+            <div className="absolute pointer-events-none z-[4]"
+              style={{
+                left: entryX,
+                top: 0,
+                bottom: 0,
+                width: 1,
+                backgroundImage: `repeating-linear-gradient(to bottom, ${color}90 0px, ${color}90 6px, transparent 6px, transparent 12px)`,
+              }} />
+            {/* Label "Abertura da negociação" */}
+            <div className="absolute pointer-events-none z-[8]"
+              style={{ left: entryX + 6, top: 8 }}>
+              <span className="text-[10px] font-semibold whitespace-nowrap px-1.5 py-0.5 rounded"
+                style={{ color, backgroundColor: '#151822cc', border: `1px solid ${color}50` }}>
+                Abertura da negociação
+              </span>
+            </div>
+
+            {/* Linha vertical tracejada — Fechamento da negociação */}
+            <div className="absolute pointer-events-none z-[4]"
+              style={{
+                left: expiryX,
+                top: 0,
+                bottom: 0,
+                width: 1,
+                backgroundImage: `repeating-linear-gradient(to bottom, ${color}90 0px, ${color}90 6px, transparent 6px, transparent 12px)`,
+              }} />
+            {/* Label "Fechamento da negociação" com countdown */}
+            <div className="absolute pointer-events-none z-[8]"
+              style={{ left: expiryX + 6, top: 8 }}>
+              <TradeExpiryLabel expiryTime={trade.expiryTime} color={color} />
+            </div>
+
             {/* Zona de P&L — faixa entre entrada e preço atual */}
             {zoneHeight > 0 && (
               <div className="absolute pointer-events-none z-[3]"
@@ -1149,13 +1400,13 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
                   width: segW,
                   height: zoneHeight,
                   backgroundColor: zoneColor,
-                  opacity: 0.12,
+                  opacity: 0.10,
                 }} />
             )}
 
             {/* Linha horizontal da entrada até o vencimento */}
             <div className="absolute pointer-events-none z-[5]"
-              style={{ left: entryX, top: entryY, width: segW, height: 1, backgroundColor: color, opacity: 0.9 }} />
+              style={{ left: entryX, top: entryY, width: segW, height: 1, backgroundColor: color, opacity: 0.85 }} />
 
             {/* Círculo de entrada com seta de direção */}
             <div className="absolute pointer-events-none z-[7] rounded-full flex items-center justify-center"
@@ -1176,6 +1427,269 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
           </React.Fragment>
         )
       })}
+
+      {/* ── Drawing SVG overlay — interactive hit areas + visuals ─────────── */}
+      {drawingPixels.length > 0 && (
+        <svg
+          className="absolute z-[6]"
+          style={{ inset: 0, bottom: oscActive ? 130 : 0, overflow: 'visible', pointerEvents: activeTool ? 'none' : undefined }}
+          width="100%" height="100%"
+          onClick={() => { if (!draggingRef.current) setSelectedDrawingId(null) }}
+        >
+          {drawingPixels.map(dp => {
+            const sel = dp.id === selectedDrawingId
+            const dash = (() => {
+              const orig = drawings.find(d => d.id === dp.id)
+              return (orig?.style ?? 'dashed') === 'dashed' ? '5,4' : undefined
+            })()
+            const origDraw = drawings.find(d => d.id === dp.id)
+
+            if (dp.type === 'hline') return (
+              <g key={dp.id} style={{ pointerEvents: 'none' }}>
+                {/* Hit area */}
+                <line x1={0} y1={dp.y} x2="9999" y2={dp.y}
+                  stroke="transparent" strokeWidth={14}
+                  style={{ pointerEvents: 'stroke', cursor: 'ns-resize' }}
+                  onMouseDown={e => origDraw && startDrawingDrag(dp.id, 'body', e, origDraw)}
+                />
+                {/* Visible line */}
+                <line x1={0} y1={dp.y} x2="9999" y2={dp.y}
+                  stroke={sel ? '#ffffff' : dp.color}
+                  strokeWidth={sel ? 1.5 : 1}
+                  strokeDasharray={dash}
+                  style={{ pointerEvents: 'none' }}
+                />
+                {/* Price label */}
+                <rect x={4} y={dp.y - 8} width={62} height={14} fill="#151822dd" rx={2} style={{ pointerEvents: 'none' }} />
+                <text x={7} y={dp.y + 2} fill={sel ? '#ffffff' : dp.color} fontSize={9} fontFamily="monospace" style={{ pointerEvents: 'none' }}>
+                  {dp.price.toFixed(5)}
+                </text>
+                {/* Selection circle handle */}
+                {sel && <circle cx={200} cy={dp.y} r={5} fill={dp.color} stroke="#fff" strokeWidth={1.5} style={{ pointerEvents: 'none' }} />}
+              </g>
+            )
+
+            if (dp.type === 'vline') return (
+              <g key={dp.id} style={{ pointerEvents: 'none' }}>
+                <line x1={dp.x} y1={0} x2={dp.x} y2="9999"
+                  stroke="transparent" strokeWidth={14}
+                  style={{ pointerEvents: 'stroke', cursor: 'ew-resize' }}
+                  onMouseDown={e => origDraw && startDrawingDrag(dp.id, 'body', e, origDraw)}
+                />
+                <line x1={dp.x} y1={0} x2={dp.x} y2="9999"
+                  stroke={sel ? '#ffffff' : dp.color}
+                  strokeWidth={sel ? 1.5 : 1}
+                  strokeDasharray={dash}
+                  style={{ pointerEvents: 'none' }}
+                />
+                {sel && <circle cx={dp.x} cy={80} r={5} fill={dp.color} stroke="#fff" strokeWidth={1.5} style={{ pointerEvents: 'none' }} />}
+              </g>
+            )
+
+            if (dp.type === 'trendline') return (
+              <g key={dp.id} style={{ pointerEvents: 'none' }}>
+                {/* Body hit area */}
+                <line x1={dp.x1} y1={dp.y1} x2={dp.x2} y2={dp.y2}
+                  stroke="transparent" strokeWidth={14}
+                  style={{ pointerEvents: 'stroke', cursor: 'move' }}
+                  onMouseDown={e => origDraw && startDrawingDrag(dp.id, 'body', e, origDraw)}
+                />
+                <line x1={dp.x1} y1={dp.y1} x2={dp.x2} y2={dp.y2}
+                  stroke={sel ? '#ffffff' : dp.color}
+                  strokeWidth={sel ? 2 : 1.5}
+                  strokeDasharray={dash}
+                  style={{ pointerEvents: 'none' }}
+                />
+                {/* Endpoint handles */}
+                <circle cx={dp.x1} cy={dp.y1} r={sel ? 6 : 4} fill={sel ? '#fff' : dp.color}
+                  stroke={dp.color} strokeWidth={sel ? 2 : 0}
+                  style={{ pointerEvents: sel ? 'all' : 'none', cursor: 'crosshair' }}
+                  onMouseDown={e => origDraw && startDrawingDrag(dp.id, 'p1', e, origDraw)}
+                />
+                <circle cx={dp.x2} cy={dp.y2} r={sel ? 6 : 4} fill={sel ? '#fff' : dp.color}
+                  stroke={dp.color} strokeWidth={sel ? 2 : 0}
+                  style={{ pointerEvents: sel ? 'all' : 'none', cursor: 'crosshair' }}
+                  onMouseDown={e => origDraw && startDrawingDrag(dp.id, 'p2', e, origDraw)}
+                />
+              </g>
+            )
+
+            if (dp.type === 'fib') {
+              const xLeft  = Math.min(dp.x1, dp.x2)
+              const xRight = Math.max(dp.x1, dp.x2)
+              return (
+                <g key={dp.id} style={{ pointerEvents: 'none' }}>
+                  {/* Diagonal guide */}
+                  <line x1={dp.x1} y1={dp.y1} x2={dp.x2} y2={dp.y2}
+                    stroke={dp.color} strokeWidth={1} strokeDasharray="3,3" opacity={0.35}
+                    style={{ pointerEvents: 'none' }}
+                  />
+                  {/* Fib levels */}
+                  {dp.levels.map((lv, i) => (
+                    <g key={lv.ratio} style={{ pointerEvents: 'none' }}>
+                      <line x1={xLeft} y1={lv.y} x2={xRight} y2={lv.y}
+                        stroke="transparent" strokeWidth={12}
+                        style={{ pointerEvents: 'stroke', cursor: 'move' }}
+                        onMouseDown={e => origDraw && startDrawingDrag(dp.id, 'body', e, origDraw)}
+                      />
+                      <line x1={xLeft} y1={lv.y} x2={xRight} y2={lv.y}
+                        stroke={sel ? '#ffffff' : FIB_COLORS[i % FIB_COLORS.length]}
+                        strokeWidth={1}
+                        style={{ pointerEvents: 'none' }}
+                      />
+                      <rect x={xRight + 4} y={lv.y - 7} width={48} height={12} fill="#151822dd" rx={2} style={{ pointerEvents: 'none' }} />
+                      <text x={xRight + 7} y={lv.y + 2}
+                        fill={sel ? '#ffffff' : FIB_COLORS[i % FIB_COLORS.length]}
+                        fontSize={9} fontFamily="monospace"
+                        style={{ pointerEvents: 'none' }}
+                      >
+                        {(lv.ratio * 100).toFixed(1)}%
+                      </text>
+                    </g>
+                  ))}
+                  {/* Endpoint handles when selected */}
+                  {sel && <>
+                    <circle cx={dp.x1} cy={dp.y1} r={6} fill="#fff" stroke={dp.color} strokeWidth={2}
+                      style={{ pointerEvents: 'all', cursor: 'crosshair' }}
+                      onMouseDown={e => origDraw && startDrawingDrag(dp.id, 'p1', e, origDraw)}
+                    />
+                    <circle cx={dp.x2} cy={dp.y2} r={6} fill="#fff" stroke={dp.color} strokeWidth={2}
+                      style={{ pointerEvents: 'all', cursor: 'crosshair' }}
+                      onMouseDown={e => origDraw && startDrawingDrag(dp.id, 'p2', e, origDraw)}
+                    />
+                  </>}
+                </g>
+              )
+            }
+            return null
+          })}
+        </svg>
+      )}
+
+      {/* ── Inline toolbar for selected drawing ────────────────────────────── */}
+      {selectedDrawingId && (() => {
+        const dp = drawingPixels.find(p => p.id === selectedDrawingId)
+        const draw = drawings.find(d => d.id === selectedDrawingId)
+        if (!dp || !draw) return null
+        const toolbarY = dp.type === 'hline' ? dp.y
+          : dp.type === 'vline' ? 40
+          : 'x1' in dp ? Math.min(dp.y1, dp.y2) - 8
+          : 40
+        const toolbarX = dp.type === 'vline' ? dp.x + 10
+          : 'x1' in dp ? Math.min(dp.x1, dp.x2) + 10
+          : 10
+        const label = { hline: 'LINHA HORIZ.', vline: 'LINHA VERT.', trendline: 'TENDÊNCIA', fib: 'FIBONACCI' }[dp.type] ?? dp.type.toUpperCase()
+        return (
+          <div
+            className="absolute z-[8] flex items-center gap-1 px-2 py-1 rounded"
+            style={{
+              left: toolbarX, top: toolbarY - 26,
+              background: '#1a1e2e',
+              border: '1px solid #2a2e3b',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.5)',
+              pointerEvents: 'auto',
+              userSelect: 'none',
+            }}
+            onMouseDown={e => e.stopPropagation()}
+          >
+            <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: draw.color }} />
+            <span className="text-[10px] font-bold text-white tracking-wide">{label}</span>
+            <div className="w-px h-3 bg-[#2a2e3b] mx-0.5" />
+            <button
+              onClick={() => { setDrawingsOpen(true); setSelectedDrawingId(selectedDrawingId) }}
+              className="w-5 h-5 flex items-center justify-center text-[#8b8f9a] hover:text-white transition-colors text-[10px]"
+              title="Configurações"
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </button>
+            <button
+              onClick={() => deleteDrawing(selectedDrawingId)}
+              className="w-5 h-5 flex items-center justify-center text-[#8b8f9a] hover:text-red-400 transition-colors"
+              title="Remover"
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
+        )
+      })()}
+
+      {/* ── Live preview while drawing ──────────────────────────────────────── */}
+      {activeTool && mousePx && (
+        <svg
+          className="absolute pointer-events-none z-[6]"
+          style={{ inset: 0, bottom: oscActive ? 130 : 0, overflow: 'visible' }}
+          width="100%" height="100%"
+        >
+          {activeTool === 'Linha horizontal' && (
+            <line x1={0} y1={mousePx.y} x2="9999" y2={mousePx.y} stroke="#ffffff" strokeWidth={1} strokeDasharray="4,4" opacity={0.45} />
+          )}
+          {activeTool === 'Linha vertical' && (
+            <line x1={mousePx.x} y1={0} x2={mousePx.x} y2="9999" stroke="#ffffff" strokeWidth={1} strokeDasharray="4,4" opacity={0.45} />
+          )}
+          {(activeTool === 'Linha de trend' || activeTool === 'Retração de Fibonacci') && pendingPoint && chartRef.current && seriesRef.current && (() => {
+            const px1 = chartRef.current.timeScale().timeToCoordinate(pendingPoint.time) ?? mousePx.x
+            const py1 = seriesRef.current.priceToCoordinate(pendingPoint.price) ?? mousePx.y
+            return (
+              <>
+                <line x1={px1} y1={py1} x2={mousePx.x} y2={mousePx.y} stroke="#ffffff" strokeWidth={1} strokeDasharray="4,4" opacity={0.45} />
+                <circle cx={px1} cy={py1} r={4} fill="#ffffff" opacity={0.6} />
+              </>
+            )
+          })()}
+        </svg>
+      )}
+
+      {/* ── Mouse capture layer (active only when a tool is selected) ────────── */}
+      {activeTool && (
+        <div
+          className="absolute z-[15]"
+          style={{ top: 0, left: 0, right: 0, bottom: oscActive ? 130 : 0, cursor: 'crosshair' }}
+          onClick={(e) => {
+            if (!chartRef.current || !seriesRef.current) return
+            const rect = e.currentTarget.getBoundingClientRect()
+            const x = e.clientX - rect.left
+            const y = e.clientY - rect.top
+            const ts = chartRef.current.timeScale()
+            const time = ts.coordinateToTime(x) as number | null
+            const price = seriesRef.current.coordinateToPrice(y) as number | null
+            if (time == null || price == null) return
+            const tool = activeToolRef.current!
+            const isTwoPoint = tool === 'Linha de trend' || tool === 'Retração de Fibonacci'
+            if (!isTwoPoint) {
+              const color = nextDrawColor()
+              const id = `d${Date.now()}`
+              setDrawings(prev => [...prev, tool === 'Linha horizontal'
+                ? { id, type: 'hline', price, color }
+                : { id, type: 'vline', time, color }
+              ])
+              setActiveTool(null)
+            } else {
+              const pp = pendingPointRef.current
+              if (!pp) {
+                setPendingPoint({ price, time })
+              } else {
+                const color = nextDrawColor()
+                const id = `d${Date.now()}`
+                setDrawings(prev => [...prev, tool === 'Linha de trend'
+                  ? { id, type: 'trendline', p1: pp, p2: { price, time }, color }
+                  : { id, type: 'fib', p1: pp, p2: { price, time }, color }
+                ])
+                setPendingPoint(null)
+                setActiveTool(null)
+              }
+            }
+          }}
+          onMouseMove={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect()
+            setMousePx({ x: e.clientX - rect.left, y: e.clientY - rect.top })
+          }}
+          onMouseLeave={() => setMousePx(null)}
+        />
+      )}
 
       {/* Chart — absolute so oscillator panel doesn't depend on flex shrink */}
       <div
