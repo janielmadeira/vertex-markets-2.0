@@ -5,6 +5,7 @@ import { X, Search, Star, ChevronUp, ChevronDown } from 'lucide-react'
 import { ASSETS, DEFAULT_FAVORITES, type Asset } from '@/lib/mockData'
 import { cn } from '@/lib/utils'
 import { FlagPair } from '@/components/ui/FlagPair'
+import { isRealMarket, getMarketSource } from '@/lib/marketSymbols'
 
 interface AssetSelectorModalProps {
   selectedAsset: Asset
@@ -173,7 +174,16 @@ export function AssetSelectorModal({ selectedAsset, onSelect, onClose }: AssetSe
                   </button>
                   <FlagPair code1={asset.code1} code2={asset.code2} size={22} />
                   <span className="text-sm font-semibold text-white truncate">{asset.symbol}</span>
-                  {asset.type === 'OTC' && (
+                  {isRealMarket(asset.id) ? (
+                    <span className={cn(
+                      'text-[8px] font-bold px-1.5 py-0.5 rounded flex-shrink-0 leading-none',
+                      getMarketSource(asset.id) === 'binance'
+                        ? 'bg-yellow-500/15 text-yellow-400 border border-yellow-500/30'
+                        : 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
+                    )}>
+                      {getMarketSource(asset.id) === 'binance' ? 'BINANCE' : 'LIVE'}
+                    </span>
+                  ) : asset.type === 'OTC' && (
                     <span className="text-[9px] text-[#8b8f9a] border border-[#3a3f50] px-1 py-0.5 rounded flex-shrink-0">OTC</span>
                   )}
                 </div>

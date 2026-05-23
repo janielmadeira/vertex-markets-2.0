@@ -626,16 +626,36 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
       const cacheKey = `${asset.id}:${selectedTf.seconds}`
       const cached = candleCache.get(cacheKey)
 
-      // Usa cache se existir e ainda estiver dentro do TTL — garante que
-      // ao voltar para um par o gráfico histórico seja idêntico ao anterior.
+      // 1. Busca preço real ANTES dos candles para poder seedar os mock corretamente
+      let realPrice: number | null = null
+      if (realConfig) {
+        const priceParams = new URLSearchParams({ symbol: realConfig.symbol, source: realConfig.source })
+        try {
+          const res = await fetch(`/api/market/price?${priceParams}`)
+          const json = await res.json()
+          if (json.price) realPrice = json.price
+        } catch {}
+        realPriceInterval = setInterval(async () => {
+          try {
+            const r = await fetch(`/api/market/price?${priceParams}`)
+            const j = await r.json()
+            if (j.price) realPrice = j.price
+          } catch {}
+        }, 12_000)
+      }
+
+      // 2. Gera candles mock usando o preço real como seed (fallback para asset.price)
+      const seedPrice = realPrice ?? asset.price
       let candles: Candle[]
       if (cached && Date.now() - cached.ts < CANDLE_CACHE_TTL) {
         candles = cached.candles
       } else {
-        candles = generateMockCandles(asset.price, candleLimit, selectedTf.seconds, cacheKey)
+        candles = generateMockCandles(seedPrice, candleLimit, selectedTf.seconds, cacheKey)
         candleCache.set(cacheKey, { candles, ts: Date.now() })
       }
 
+      // 3. Tenta substituir pelos candles reais — mas só se não estiverem velhos
+      //    (Forex fecha no fim de semana; candles velhos causam gap visual enorme)
       if (realConfig && interval) {
         try {
           const params = new URLSearchParams({
@@ -647,29 +667,19 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
           const res = await fetch(`/api/market/candles?${params}`)
           const json = await res.json()
           if (json.candles?.length > 0) {
-            candles = json.candles
-            candleCache.set(cacheKey, { candles, ts: Date.now() })
+            const last = json.candles[json.candles.length - 1]
+            const nowBRT = Math.floor(Date.now() / 1000) - 3 * 3600
+            const ageHours = (nowBRT - (last.time as number)) / 3600
+            // Binance: sempre usa (cripto 24/7). Yahoo: só usa se candles < 3h
+            const useReal = isBinance || ageHours < 3
+            if (useReal) {
+              candles = json.candles
+              candleCache.set(cacheKey, { candles, ts: Date.now() })
+            }
+            // Se candles estão velhos (forex fechado), mantém OTC mock
+            // seedado do preço real — visual coerente com o preço atual
           }
         } catch {}
-      }
-
-      // Fetch initial real price — used by live engine below
-      let realPrice: number | null = null
-      if (realConfig) {
-        const priceParams = new URLSearchParams({ symbol: realConfig.symbol, source: realConfig.source })
-        try {
-          const res = await fetch(`/api/market/price?${priceParams}`)
-          const json = await res.json()
-          if (json.price) realPrice = json.price
-        } catch {}
-        // Poll every 12s — server cache 10s → máx 5 req/min (Basic: 8/min)
-        realPriceInterval = setInterval(async () => {
-          try {
-            const r = await fetch(`/api/market/price?${priceParams}`)
-            const j = await r.json()
-            if (j.price) realPrice = j.price
-          } catch {}
-        }, 12_000)
       }
 
       // BB fill areas must be added BEFORE the main series so candles render on top

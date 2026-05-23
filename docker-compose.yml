@@ -1,0 +1,38 @@
+services:
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_SUPABASE_URL:      ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_APP_URL:           ${NEXT_PUBLIC_APP_URL}
+    container_name: vertex-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # Runtime — não são expostas ao browser, ficam só no servidor
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      BSPAY_CLIENT_ID:           ${BSPAY_CLIENT_ID}
+      BSPAY_CLIENT_SECRET:       ${BSPAY_CLIENT_SECRET}
+      BSPAY_WEBHOOK_SECRET:      ${BSPAY_WEBHOOK_SECRET}
+      TWELVE_DATA_API_KEY:       ${TWELVE_DATA_API_KEY}
+      FINNHUB_API_KEY:           ${FINNHUB_API_KEY}
+      NEXT_PUBLIC_APP_URL:       ${NEXT_PUBLIC_APP_URL}
+    labels:
+      # Traefik — SSL automático via Let's Encrypt
+      - "traefik.enable=true"
+      - "traefik.http.routers.vertex-web.rule=Host(`vertexmarkets.co`) || Host(`www.vertexmarkets.co`)"
+      - "traefik.http.routers.vertex-web.entrypoints=websecure"
+      - "traefik.http.routers.vertex-web.tls.certresolver=letsencrypt"
+      - "traefik.http.services.vertex-web.loadbalancer.server.port=3000"
+      # Redirect www → apex
+      - "traefik.http.middlewares.www-redirect.redirectregex.regex=^https://www\\.vertexmarkets\\.co/(.*)"
+      - "traefik.http.middlewares.www-redirect.redirectregex.replacement=https://vertexmarkets.co/$${1}"
+      - "traefik.http.routers.vertex-web.middlewares=www-redirect"
+
+networks:
+  default:
+    external: true
+    name: easypanel

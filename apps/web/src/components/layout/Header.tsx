@@ -6,6 +6,7 @@ import { ASSETS, type Asset } from '@/lib/mockData'
 import { cn } from '@/lib/utils'
 import { AccountDropdown } from './AccountDropdown'
 import { FlagPair } from '@/components/ui/FlagPair'
+import { isRealMarket, getMarketSource } from '@/lib/marketSymbols'
 
 interface HeaderProps {
   selectedAsset: Asset
@@ -178,7 +179,19 @@ export function Header({
               )}
               <FlagPair code1={asset.code1} code2={asset.code2} size={18} />
               <div>
-                <div className="text-xs font-semibold leading-tight">{asset.symbol}</div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-semibold leading-tight">{asset.symbol}</span>
+                  {isRealMarket(asset.id) && (
+                    <span className={cn(
+                      'text-[8px] font-bold px-1 py-0.5 rounded leading-none',
+                      getMarketSource(asset.id) === 'binance'
+                        ? 'bg-yellow-500/20 text-yellow-400'
+                        : 'bg-blue-500/20 text-blue-400'
+                    )}>
+                      {getMarketSource(asset.id) === 'binance' ? 'BINANCE' : 'LIVE'}
+                    </span>
+                  )}
+                </div>
                 <div className="text-[10px] text-green-400 font-bold leading-tight">{asset.payout}%</div>
               </div>
               {isActive && (
