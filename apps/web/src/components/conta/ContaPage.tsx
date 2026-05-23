@@ -8,16 +8,18 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AnalisePage } from '@/components/analise/AnalisePage'
+import { VerificacaoTab } from '@/components/conta/VerificacaoTab'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore, useCurrentAccount } from '@/store/auth'
 
-type ContaTab = 'retirada' | 'transacoes' | 'operacoes' | 'minha-conta' | 'mercado' | 'torneios' | 'analise'
+type ContaTab = 'retirada' | 'transacoes' | 'operacoes' | 'minha-conta' | 'verificacao' | 'mercado' | 'torneios' | 'analise'
 
 const CONTA_TABS: { key: ContaTab; label: string }[] = [
   { key: 'retirada', label: 'Retirada' },
   { key: 'transacoes', label: 'Transações' },
   { key: 'operacoes', label: 'Operações' },
   { key: 'minha-conta', label: 'Minha Conta' },
+  { key: 'verificacao', label: 'Verificação' },
   { key: 'mercado', label: 'Mercado' },
   { key: 'torneios', label: 'Torneios' },
   { key: 'analise', label: 'Análise' },
@@ -736,6 +738,7 @@ export function ContaPage({ initialTab = 'minha-conta' }: { initialTab?: ContaTa
       {activeTab === 'retirada' && <RetiradaTab />}
       {activeTab === 'transacoes' && <TransacoesTab />}
       {activeTab === 'operacoes' && <OperacoesTab />}
+      {activeTab === 'verificacao' && <VerificacaoTab />}
 
       {activeTab === 'minha-conta' && (
         <div className="flex-1 overflow-y-auto">
@@ -862,7 +865,7 @@ export function ContaPage({ initialTab = 'minha-conta' }: { initialTab?: ContaTa
 
       {activeTab === 'analise' && <AnalisePage />}
 
-      {activeTab !== 'minha-conta' && activeTab !== 'retirada' && activeTab !== 'transacoes' && activeTab !== 'operacoes' && activeTab !== 'analise' && (
+      {activeTab !== 'minha-conta' && activeTab !== 'retirada' && activeTab !== 'transacoes' && activeTab !== 'operacoes' && activeTab !== 'analise' && activeTab !== 'verificacao' && (
         <div className="flex-1 flex items-center justify-center">
           <p className="text-sm text-[#8b8f9a]">Em breve</p>
         </div>
