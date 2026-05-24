@@ -42,20 +42,31 @@ enum KycStatus {
   REJECTED
 }
 
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum OtcAssetStatus {
+  ACTIVE
+  INACTIVE
+}
+
 // ─── Models ───────────────────────────────────────────────────────────────────
 
 model User {
-  id           String     @id @default(cuid())
-  email        String     @unique
-  password     String
-  name         String
-  phone        String?
-  country      String?
-  kycStatus    KycStatus  @default(PENDING)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  id        String    @id @default(cuid())
+  email     String    @unique
+  password  String
+  name      String
+  phone     String?
+  country   String?
+  kycStatus KycStatus @default(PENDING)
+  role      UserRole  @default(USER)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
-  accounts     Account[]
+  accounts Account[]
 
   @@map("users")
 }
@@ -98,6 +109,43 @@ model Operation {
   @@index([accountId, status])
   @@index([expiresAt, status])
   @@map("operations")
+}
+
+model OtcAsset {
+  id              String         @id @default(cuid())
+  symbol          String         @unique
+  name            String
+  basePrice       Decimal        @db.Decimal(18, 5)
+  volatility      Decimal        @default(0.0010) @db.Decimal(8, 6)
+  trend           Decimal        @default(0) @db.Decimal(8, 6)
+  payout          Int            @default(85)
+  decimals        Int            @default(5)
+  status          OtcAssetStatus @default(ACTIVE)
+  sessionStartUtc String?
+  sessionEndUtc   String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  candles OtcCandle[]
+
+  @@map("otc_assets")
+}
+
+model OtcCandle {
+  id        BigInt   @id @default(autoincrement())
+  assetId   String
+  timeframe Int
+  openTime  DateTime
+  open      Decimal  @db.Decimal(18, 5)
+  high      Decimal  @db.Decimal(18, 5)
+  low       Decimal  @db.Decimal(18, 5)
+  close     Decimal  @db.Decimal(18, 5)
+
+  asset OtcAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, timeframe, openTime])
+  @@index([assetId, timeframe, openTime(sort: Desc)])
+  @@map("otc_candles")
 }
 
 model Transaction {

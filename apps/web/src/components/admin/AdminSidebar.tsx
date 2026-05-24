@@ -6,7 +6,7 @@ import {
   LayoutDashboard, Brain, Users, Wallet, TrendingUp, ShieldCheck,
   ArrowDownCircle, ArrowUpCircle, MessageSquare, UserPlus, Copy,
   Trophy, Gift, Zap, BarChart2, Clock, Cpu, Settings, ChevronRight,
-  LogOut, Lock,
+  LogOut, Lock, FileSearch,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth'
@@ -32,6 +32,7 @@ const NAV = [
   { label: 'Cadastro OTC',   href: '/admin/otc',            icon: Cpu },
   { label: 'Ranking',        href: '/admin/ranking',        icon: Trophy },
   { label: 'Segurança (2FA)',href: '/admin/seguranca/2fa',  icon: Lock },
+  { label: 'Audit Log',      href: '/admin/audit-log',      icon: FileSearch },
   { label: 'Configurações',  href: '/admin/configuracoes',  icon: Settings },
 ]
 

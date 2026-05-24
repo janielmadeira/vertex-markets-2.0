@@ -8,7 +8,9 @@
     "start": "prisma migrate deploy && node dist/main.js",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "db:seed-otc": "tsx prisma/seed-otc.ts",
+    "db:promote-admin": "tsx prisma/promote-admin.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
