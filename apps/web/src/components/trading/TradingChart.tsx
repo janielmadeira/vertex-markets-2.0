@@ -618,11 +618,14 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
 
       chartRef.current = chart
 
-      // Server-authoritative OTC: se este asset for OTC e o backend tiver o símbolo,
-      // assinar ticks via WebSocket. Substitui o getOTCPrice client-side no getPrice().
-      const otcSymbol = assetIdToOtcSymbol(asset.id)
-      if (otcSymbol) {
-        otcWs = subscribeOtc(otcSymbol, (tick) => { otcWsPrice = tick.price })
+      // Server-authoritative OTC via WebSocket — DESLIGADO temporariamente.
+      // Ativar setando NEXT_PUBLIC_OTC_WS=1. Mantemos engine client-side enquanto
+      // depuramos o handshake do WS no navegador (wscat funciona, browser não).
+      if (process.env.NEXT_PUBLIC_OTC_WS === '1') {
+        const otcSymbol = assetIdToOtcSymbol(asset.id)
+        if (otcSymbol) {
+          otcWs = subscribeOtc(otcSymbol, (tick) => { otcWsPrice = tick.price })
+        }
       }
 
       // Real data for configured assets; OTC engine for everything else
