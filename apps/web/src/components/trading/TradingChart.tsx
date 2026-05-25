@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Pencil, ZoomIn, ZoomOut, Crosshair, ChevronDown, Eye, Pen, X, Activity, Bell } from 'lucide-react'
 import { generateMockCandles, getOTCPrice, getAssetDecimals, type Asset, type Candle, type ActiveTrade } from '@/lib/mockData'
 import { REAL_ASSETS, tfToBinanceInterval } from '@/lib/marketSymbols'
-import { subscribeOtc, assetIdToOtcSymbol, type OtcSubscription } from '@/lib/otcClient'
+import { subscribeOtc, assetIdToOtcSymbol, fetchOtcCandles, OTC_BACKEND_TFS, type OtcSubscription } from '@/lib/otcClient'
 import { cn } from '@/lib/utils'
 import { DrawingsPanel } from './DrawingsPanel'
 import { DrawingSettingsPanel } from './DrawingSettingsPanel'
@@ -580,6 +580,7 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
     let rafId: number | null = null
     let otcWs: OtcSubscription | null = null
     let otcWsPrice: number | null = null   // último preço recebido do backend (server-authoritative)
+    let otcResetNeeded = false             // sinaliza ao priceInterval pra "snap" no primeiro tick (evita candle gigante)
 
     async function initChart() {
       if (!chartContainerRef.current) return
@@ -618,16 +619,6 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
 
       chartRef.current = chart
 
-      // Server-authoritative OTC via WebSocket — DESLIGADO temporariamente.
-      // Ativar setando NEXT_PUBLIC_OTC_WS=1. Mantemos engine client-side enquanto
-      // depuramos o handshake do WS no navegador (wscat funciona, browser não).
-      if (process.env.NEXT_PUBLIC_OTC_WS === '1') {
-        const otcSymbol = assetIdToOtcSymbol(asset.id)
-        if (otcSymbol) {
-          otcWs = subscribeOtc(otcSymbol, (tick) => { otcWsPrice = tick.price })
-        }
-      }
-
       // Real data for configured assets; OTC engine for everything else
       const realConfig = REAL_ASSETS[asset.id] ?? null
       const isBinance  = realConfig?.source === 'binance'
@@ -665,6 +656,35 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
       } else {
         candles = generateMockCandles(seedPrice, candleLimit, selectedTf.seconds, cacheKey)
         candleCache.set(cacheKey, { candles, ts: Date.now() })
+      }
+
+      // 2b. OTC server-authoritative: se o asset é OTC mapeado E o tf é suportado pelo
+      //     backend (5, 15, 60, 300), substitui o mock pelos candles reais do servidor.
+      //     Garante que histórico e (futuramente) ticks ao vivo são da mesma fonte.
+      const otcSymbolForHistory = assetIdToOtcSymbol(asset.id)
+      const tfSupportedByOtc    = (OTC_BACKEND_TFS as readonly number[]).includes(selectedTf.seconds)
+      let otcBackendActive = false   // true quando histórico veio do backend OTC (etapa C)
+      if (otcSymbolForHistory && tfSupportedByOtc && !realConfig) {
+        const otcCandles = await fetchOtcCandles(otcSymbolForHistory, selectedTf.seconds, candleLimit)
+        if (otcCandles && otcCandles.length > 0) {
+          candles = otcCandles.map(c => ({
+            time:  (c.t - 3 * 3600) as any,   // backend epoch UTC -> eixo BRT do chart (UTC-3)
+            open:  c.o, high: c.h, low: c.l, close: c.c,
+          }))
+          candleCache.set(cacheKey, { candles, ts: Date.now() })
+          otcBackendActive = true
+        }
+      }
+
+      // 2c. WS server-authoritative: live ticks do backend. Roda só se temos o símbolo
+      //     mapeado. Quando otcBackendActive=true, a transição histórico→live é natural.
+      //     Quando false (asset OTC fora do backend ou TF não suportado), reset é necessário
+      //     pra evitar candle gigante entre mock e live.
+      if (otcSymbolForHistory && process.env.NEXT_PUBLIC_OTC_WS !== '0') {
+        otcWs = subscribeOtc(otcSymbolForHistory, (tick) => {
+          if (otcWsPrice == null && !otcBackendActive) otcResetNeeded = true
+          otcWsPrice = tick.price
+        })
       }
 
       // 3. Tenta substituir pelos candles reais — mas só se não estiverem velhos
@@ -849,9 +869,12 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
       const alignedStart = (t: number) => Math.floor(t / tfSec) * tfSec
 
       const getPrice = () => {
-        // Server-authoritative: se temos tick OTC ao vivo do backend, usa ele.
-        // Cai pro engine client-side determinístico apenas como fallback (WS ainda não chegou).
+        // 1) Tick ao vivo do servidor (etapa D, quando WS estiver ligado)
         if (otcWsPrice != null) return fmt5(otcWsPrice)
+        // 2) Histórico OTC veio do backend mas WS ainda OFF: congela no último fechamento
+        //    (sem isso o engine local gera ticks em outra escala de preço e causa candle gigante).
+        if (otcBackendActive) return fmt5(candles[candles.length - 1].close)
+        // 3) Fallback engine client-side (OTC fora do backend, ou TF não suportado)
         if (!realConfig || realPrice == null) return fmt5(getOTCPrice(asset.id, nowSec(), asset.price))
         const otcBase = getOTCPrice(asset.id, nowSec(), realPrice)
         const noise   = (otcBase - realPrice) * 0.08
@@ -877,12 +900,16 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
       const entryPrice = lastHistClose
       let lastSecsLeft = -1
 
-      // Preenche gap entre último candle histórico e o motor ao vivo
+      // Preenche gap entre último candle histórico e o motor ao vivo (só pro engine local).
+      // Quando o backend OTC fornece o histórico, o gap é mínimo (engine grava candle em tempo real)
+      // e qualquer preço gerado client-side estaria em escala errada.
       const lastHistTime = candles[candles.length - 1].time as number
-      for (let gapT = lastHistTime + tfSec; gapT < candleStart; gapT += tfSec) {
-        const gapPrice = fmt5(getOTCPrice(asset.id, gapT, asset.price))
-        if (chartType === 'area') mainSeries.update({ time: gapT, value: gapPrice })
-        else mainSeries.update({ time: gapT, open: gapPrice, high: gapPrice, low: gapPrice, close: gapPrice })
+      if (!otcBackendActive) {
+        for (let gapT = lastHistTime + tfSec; gapT < candleStart; gapT += tfSec) {
+          const gapPrice = fmt5(getOTCPrice(asset.id, gapT, asset.price))
+          if (chartType === 'area') mainSeries.update({ time: gapT, value: gapPrice })
+          else mainSeries.update({ time: gapT, open: gapPrice, high: gapPrice, low: gapPrice, close: gapPrice })
+        }
       }
       // Candle inicial
       if (chartType === 'area') mainSeries.update({ time: candleStart, value: lastHistClose })
@@ -898,6 +925,17 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
         if (next > 0) targetPrice = next
 
         const now = nowSec()
+
+        // Reset solicitado pelo primeiro tick OTC do servidor:
+        // evita candle gigante quando o preço mock diverge muito do real.
+        if (otcResetNeeded) {
+          otcResetNeeded = false
+          candleStart    = alignedStart(now)
+          displayedPrice = targetPrice
+          candleOpen     = fmt5(targetPrice)
+          candleHigh     = candleOpen
+          candleLow      = candleOpen
+        }
 
         // Avança candle quando o período termina.
         // Snap de displayedPrice → targetPrice na troca de vela:

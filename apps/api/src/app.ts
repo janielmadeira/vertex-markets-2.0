@@ -19,9 +19,19 @@ export async function buildApp() {
     'http://localhost:3001',
     ...(process.env.FRONTEND_URL ?? '').split(',').map(o => o.trim()).filter(Boolean),
   ]
+  // Aceita qualquer subdomínio .easypanel.host (proxy reverso pode bater em vários hostnames)
+  function isOriginAllowed(origin: string): boolean {
+    if (allowedOrigins.some(o => origin.startsWith(o))) return true
+    try {
+      const host = new URL(origin).hostname
+      if (host.endsWith('.easypanel.host')) return true
+    } catch { /* origin malformado */ }
+    return false
+  }
   await app.register(cors, {
     origin: (origin, cb) => {
-      if (!origin || allowedOrigins.some(o => origin.startsWith(o))) return cb(null, true)
+      if (!origin || isOriginAllowed(origin)) return cb(null, true)
+      app.log.warn({ origin }, 'CORS rejected origin')
       cb(new Error('Not allowed by CORS'), false)
     },
     credentials: true,
