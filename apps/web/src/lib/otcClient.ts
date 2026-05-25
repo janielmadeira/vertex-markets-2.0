@@ -16,13 +16,36 @@ export type OtcSubscription = {
   close: () => void
 }
 
-// Mapeia asset.id do front (ex: "usd-brl-otc") para o símbolo do backend ("USDBRL-OTC").
-// Retorna null se o asset não for OTC ou não tiver mapeamento óbvio.
+// Tabela explícita: somente estes 10 pares têm gerador server-authoritative.
+// Asset IDs no front são irregulares (ex: "btc-otc" vs "usd-brl-otc"), então
+// um mapeamento explícito é mais seguro que derivar por string.
+const OTC_SYMBOL_MAP: Record<string, string> = {
+  // Forex
+  'usd-brl-otc': 'USDBRL-OTC',
+  'usd-chf-otc': 'USDCHF-OTC',
+  'eur-aud-otc': 'EURAUD-OTC',
+  // Cripto
+  'btc-otc':  'BTCUSD-OTC',
+  'eth-otc':  'ETHUSD-OTC',
+  'sol-otc':  'SOLUSD-OTC',
+  'xrp-otc':  'XRPUSD-OTC',
+  'doge-otc': 'DOGEUSD-OTC',
+  // Ações
+  'aapl-otc': 'AAPL-OTC',
+  'tsla-otc': 'TSLA-OTC',
+}
+
+// Mapeia asset.id do front para o símbolo do backend. Retorna null se o asset
+// não estiver na lista server-authoritative — caller cai em fallback client-side.
 export function assetIdToOtcSymbol(assetId: string): string | null {
-  if (!assetId.endsWith('-otc')) return null
-  const base = assetId.slice(0, -'-otc'.length)         // "usd-brl"
-  const pair = base.split('-').join('').toUpperCase()    // "USDBRL"
-  return `${pair}-OTC`
+  return OTC_SYMBOL_MAP[assetId] ?? null
+}
+
+// Lista os assetIds com cobertura server-authoritative (útil pra UI mostrar badge).
+export const OTC_SERVER_AUTHORITATIVE_IDS: ReadonlySet<string> = new Set(Object.keys(OTC_SYMBOL_MAP))
+
+export function isOtcServerAuthoritative(assetId: string): boolean {
+  return OTC_SERVER_AUTHORITATIVE_IDS.has(assetId)
 }
 
 // Timeframes suportados pelo backend (segundos)

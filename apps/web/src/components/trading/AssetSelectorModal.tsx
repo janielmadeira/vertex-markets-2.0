@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import { FlagPair } from '@/components/ui/FlagPair'
 import { isRealMarket, getMarketSource } from '@/lib/marketSymbols'
 import { isMarketOpen } from '@/lib/marketHours'
+import { isOtcServerAuthoritative } from '@/lib/otcClient'
 
 interface AssetSelectorModalProps {
   selectedAsset: Asset
@@ -33,9 +34,15 @@ export function AssetSelectorModal({ selectedAsset, onSelect, onClose }: AssetSe
         return true
       })
       .sort((a, b) => {
-        // OTC primeiro, depois Forex; dentro de cada grupo, ordenar por payout desc
+        // 1) OTC server-authoritative (LIVE) primeiro
+        const aLive = a.type === 'OTC' && isOtcServerAuthoritative(a.id)
+        const bLive = b.type === 'OTC' && isOtcServerAuthoritative(b.id)
+        if (aLive && !bLive) return -1
+        if (!aLive && bLive) return 1
+        // 2) OTC depois (fallback client-side)
         if (a.type === 'OTC' && b.type !== 'OTC') return -1
         if (a.type !== 'OTC' && b.type === 'OTC') return 1
+        // 3) Dentro do mesmo grupo, ordenar por payout desc
         return b.payout - a.payout
       })
   }, [activeCategory, search, showFavOnly, favorites])
@@ -144,15 +151,25 @@ export function AssetSelectorModal({ selectedAsset, onSelect, onClose }: AssetSe
             const isFav = favorites.has(asset.id)
             const isUp = asset.change24h >= 0
             const prevAsset = filtered[index - 1]
-            const showGroupDivider = index > 0 && asset.type !== prevAsset?.type
+            const isLive = asset.type === 'OTC' && isOtcServerAuthoritative(asset.id)
+            const prevIsLive = prevAsset?.type === 'OTC' && isOtcServerAuthoritative(prevAsset.id)
+            const showGroupDivider =
+              index > 0 &&
+              (asset.type !== prevAsset?.type || isLive !== prevIsLive)
+            const groupLabel = isLive
+              ? 'OTC LIVE'
+              : asset.type === 'OTC' ? 'OTC' : 'Forex'
             const marketOpen = isMarketOpen(asset)
 
             return (
               <div key={asset.id}>
                 {showGroupDivider && (
                   <div className="px-4 py-2 bg-[#1a1e2e] border-y border-[#2a2e3b]">
-                    <span className="text-[10px] font-bold text-[#8b8f9a] tracking-widest uppercase">
-                      {asset.type === 'OTC' ? 'OTC' : 'Forex'}
+                    <span className={cn(
+                      'text-[10px] font-bold tracking-widest uppercase',
+                      isLive ? 'text-green-400' : 'text-[#8b8f9a]'
+                    )}>
+                      {groupLabel}
                     </span>
                   </div>
                 )}
@@ -192,7 +209,13 @@ export function AssetSelectorModal({ selectedAsset, onSelect, onClose }: AssetSe
                       {getMarketSource(asset.id) === 'binance' ? 'BINANCE' : 'LIVE'}
                     </span>
                   ) : marketOpen && asset.type === 'OTC' && (
-                    <span className="text-[9px] text-[#8b8f9a] border border-[#3a3f50] px-1 py-0.5 rounded flex-shrink-0">OTC</span>
+                    isOtcServerAuthoritative(asset.id) ? (
+                      <span className="text-[8px] font-bold px-1.5 py-0.5 rounded flex-shrink-0 leading-none bg-green-500/15 text-green-400 border border-green-500/30">
+                        ● LIVE
+                      </span>
+                    ) : (
+                      <span className="text-[9px] text-[#8b8f9a] border border-[#3a3f50] px-1 py-0.5 rounded flex-shrink-0">OTC</span>
+                    )
                   )}
                 </div>
 
