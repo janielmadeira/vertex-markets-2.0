@@ -17,6 +17,8 @@ export async function operationRoutes(app: FastifyInstance) {
     } catch (err: any) {
       if (err.message === 'ACCOUNT_NOT_FOUND')    return reply.status(404).send({ error: 'ACCOUNT_NOT_FOUND' })
       if (err.message === 'INSUFFICIENT_BALANCE') return reply.status(422).send({ error: 'INSUFFICIENT_BALANCE' })
+      if (err.message === 'PRICE_UNAVAILABLE')    return reply.status(503).send({ error: 'PRICE_UNAVAILABLE', message: 'Engine de precos indisponivel, tente novamente em alguns segundos.' })
+      if (err.message === 'PRICE_DIVERGED')       return reply.status(409).send({ error: 'PRICE_DIVERGED', message: 'Preco do cliente divergiu do servidor; recarregue a cotacao.' })
       throw err
     }
   })

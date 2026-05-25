@@ -52,6 +52,12 @@ enum OtcAssetStatus {
   INACTIVE
 }
 
+enum PriceSource {
+  SERVER     // preco lido do Redis (engine OTC autoritativo)
+  CLIENT     // preco enviado pelo cliente (asset sem fonte server-side)
+  FALLBACK   // exit price calculado por Math.random (asset sem fonte server-side)
+}
+
 // ─── Models ───────────────────────────────────────────────────────────────────
 
 model User {
@@ -103,6 +109,11 @@ model Operation {
   expiresAt   DateTime
   openedAt    DateTime        @default(now())
   closedAt    DateTime?
+
+  // Audit trail (Fase 5): rastreia origem dos precos e gera hash reproduzivel.
+  entryPriceSource PriceSource @default(CLIENT)
+  exitPriceSource  PriceSource?
+  auditHash        String?     @db.VarChar(64)  // SHA256 hex
 
   account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
