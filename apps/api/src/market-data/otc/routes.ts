@@ -4,6 +4,8 @@ import {
   listOtcAssets, getOtcAsset, createOtcAsset,
   updateOtcAsset, deleteOtcAsset, toggleOtcAsset,
 } from './service.js'
+import { redis, KEYS } from '../../redis.js'
+import { prisma } from '../../prisma.js'
 
 export async function otcAdminRoutes(app: FastifyInstance) {
   app.addHook('preHandler', app.authenticate)
@@ -61,5 +63,41 @@ export async function otcPublicRoutes(app: FastifyInstance) {
           payout: a.payout, decimals: a.decimals,
         })),
     }
+  })
+
+  // Preço atual (server-authoritative, lido do Redis)
+  app.get('/:symbol/price', async (req, reply) => {
+    const { symbol } = req.params as { symbol: string }
+    const cached = await redis.get(KEYS.price(symbol))
+    if (!cached) return reply.status(404).send({ error: 'NO_PRICE' })
+    return { symbol, price: Number(cached), t: Math.floor(Date.now() / 1000) }
+  })
+
+  // Histórico de candles — buffer Redis primeiro, fallback Postgres
+  app.get('/:symbol/candles', async (req, reply) => {
+    const { symbol } = req.params as { symbol: string }
+    const q = req.query as { tf?: string; limit?: string }
+    const tf    = parseInt(q.tf    ?? '60', 10)
+    const limit = Math.min(parseInt(q.limit ?? '200', 10), 500)
+    if (![5, 15, 60, 300].includes(tf)) return reply.status(400).send({ error: 'INVALID_TF' })
+
+    const raw = await redis.zrevrange(KEYS.candleBuffer(symbol, tf), 0, limit - 1)
+    if (raw.length > 0) {
+      return { symbol, tf, candles: raw.map(s => JSON.parse(s)).reverse() }
+    }
+
+    // fallback: Postgres
+    const asset = await prisma.otcAsset.findUnique({ where: { symbol } })
+    if (!asset) return reply.status(404).send({ error: 'ASSET_NOT_FOUND' })
+    const rows = await prisma.otcCandle.findMany({
+      where:   { assetId: asset.id, timeframe: tf },
+      orderBy: { openTime: 'desc' },
+      take:    limit,
+    })
+    const candles = rows.reverse().map(r => ({
+      t: Math.floor(r.openTime.getTime() / 1000),
+      o: Number(r.open), h: Number(r.high), l: Number(r.low), c: Number(r.close),
+    }))
+    return { symbol, tf, candles }
   })
 }

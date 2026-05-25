@@ -1,5 +1,6 @@
 import 'dotenv/config'
 import { buildApp } from './app.js'
+import { startOtcEngine } from './market-data/otc/engine.js'
 
 const PORT = parseInt(process.env.PORT ?? '3001', 10)
 
@@ -9,6 +10,12 @@ async function start() {
     await app.listen({ port: PORT, host: '0.0.0.0' })
     console.log(`\n🚀 API rodando em http://localhost:${PORT}`)
     console.log(`   Health: http://localhost:${PORT}/health\n`)
+
+    if (process.env.OTC_ENGINE_ENABLED !== 'false') {
+      await startOtcEngine()
+    } else {
+      console.log('[otc-engine] disabled via OTC_ENGINE_ENABLED=false')
+    }
   } catch (err) {
     app.log.error(err)
     process.exit(1)
