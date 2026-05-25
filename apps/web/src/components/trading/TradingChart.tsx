@@ -677,10 +677,10 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
       }
 
       // 2c. WS server-authoritative: live ticks do backend. Roda só se temos o símbolo
-      //     mapeado. Quando otcBackendActive=true, a transição histórico→live é natural.
-      //     Quando false (asset OTC fora do backend ou TF não suportado), reset é necessário
-      //     pra evitar candle gigante entre mock e live.
-      if (otcSymbolForHistory && process.env.NEXT_PUBLIC_OTC_WS !== '0') {
+      //     mapeado E o asset não tem fonte real (Binance/Yahoo) — caso contrário, os ticks
+      //     OTC conflitam com o feed real e fazem o preço saltar (ex: BTC histórico 77k da
+      //     Binance + tick OTC a 67k = candle gigante de queda fantasma).
+      if (otcSymbolForHistory && !realConfig && process.env.NEXT_PUBLIC_OTC_WS !== '0') {
         otcWs = subscribeOtc(otcSymbolForHistory, (tick) => {
           if (otcWsPrice == null && !otcBackendActive) otcResetNeeded = true
           otcWsPrice = tick.price
