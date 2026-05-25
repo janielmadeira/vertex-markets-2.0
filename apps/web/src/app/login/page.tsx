@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { useAuthStore } from '@/store/auth'
@@ -16,6 +16,14 @@ const COUNTRIES = [
 const CURRENCIES = ['BRL', 'USD', 'EUR', 'GBP', 'ARS', 'MXN']
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#0d1117]" />}>
+      <LoginPageInner />
+    </Suspense>
+  )
+}
+
+function LoginPageInner() {
   const [tab, setTab] = useState<'login' | 'register'>('login')
   const router        = useRouter()
   const searchParams  = useSearchParams()
