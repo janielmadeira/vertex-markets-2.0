@@ -156,9 +156,7 @@ export function AssetSelectorModal({ selectedAsset, onSelect, onClose }: AssetSe
             const showGroupDivider =
               index > 0 &&
               (asset.type !== prevAsset?.type || isLive !== prevIsLive)
-            const groupLabel = isLive
-              ? 'OTC LIVE'
-              : asset.type === 'OTC' ? 'OTC' : 'Forex'
+            const groupLabel = asset.type === 'OTC' ? 'OTC' : 'Forex'
             const marketOpen = isMarketOpen(asset)
 
             return (
@@ -211,7 +209,7 @@ export function AssetSelectorModal({ selectedAsset, onSelect, onClose }: AssetSe
                   ) : marketOpen && asset.type === 'OTC' && (
                     isOtcServerAuthoritative(asset.id) ? (
                       <span className="text-[8px] font-bold px-1.5 py-0.5 rounded flex-shrink-0 leading-none bg-green-500/15 text-green-400 border border-green-500/30">
-                        ● LIVE
+                        OTC
                       </span>
                     ) : (
                       <span className="text-[9px] text-[#8b8f9a] border border-[#3a3f50] px-1 py-0.5 rounded flex-shrink-0">OTC</span>
