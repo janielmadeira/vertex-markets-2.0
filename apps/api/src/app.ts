@@ -2,10 +2,12 @@ import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import jwt from '@fastify/jwt'
 import cookie from '@fastify/cookie'
+import websocket from '@fastify/websocket'
 import { authRoutes } from './auth/routes.js'
 import { operationRoutes } from './operations/routes.js'
 import { accountRoutes } from './accounts/routes.js'
 import { otcAdminRoutes, otcPublicRoutes } from './market-data/otc/routes.js'
+import { otcWsRoutes } from './market-data/otc/ws-routes.js'
 import { prisma } from './prisma.js'
 
 export async function buildApp() {
@@ -26,6 +28,7 @@ export async function buildApp() {
   })
 
   await app.register(cookie)
+  await app.register(websocket)
 
   await app.register(jwt, {
     secret: process.env.JWT_SECRET ?? 'dev-secret-change-me',
@@ -59,6 +62,7 @@ export async function buildApp() {
   await app.register(accountRoutes,    { prefix: '/accounts' })
   await app.register(otcPublicRoutes,  { prefix: '/market-data/otc' })
   await app.register(otcAdminRoutes,   { prefix: '/admin/otc' })
+  await app.register(otcWsRoutes,      { prefix: '/ws' })
 
   return app
 }
