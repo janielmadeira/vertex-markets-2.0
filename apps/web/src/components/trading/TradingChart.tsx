@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Pencil, ZoomIn, ZoomOut, Crosshair, ChevronDown, Eye, Pen, X, Activity, Bell } from 'lucide-react'
 import { generateMockCandles, getOTCPrice, getAssetDecimals, type Asset, type Candle, type ActiveTrade } from '@/lib/mockData'
 import { REAL_ASSETS, tfToBinanceInterval } from '@/lib/marketSymbols'
+import { subscribeOtc, assetIdToOtcSymbol, type OtcSubscription } from '@/lib/otcClient'
 import { cn } from '@/lib/utils'
 import { DrawingsPanel } from './DrawingsPanel'
 import { DrawingSettingsPanel } from './DrawingSettingsPanel'
@@ -577,6 +578,8 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
     let priceInterval: ReturnType<typeof setInterval>
     let realPriceInterval: ReturnType<typeof setInterval> | null = null
     let rafId: number | null = null
+    let otcWs: OtcSubscription | null = null
+    let otcWsPrice: number | null = null   // último preço recebido do backend (server-authoritative)
 
     async function initChart() {
       if (!chartContainerRef.current) return
@@ -614,6 +617,13 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
       })
 
       chartRef.current = chart
+
+      // Server-authoritative OTC: se este asset for OTC e o backend tiver o símbolo,
+      // assinar ticks via WebSocket. Substitui o getOTCPrice client-side no getPrice().
+      const otcSymbol = assetIdToOtcSymbol(asset.id)
+      if (otcSymbol) {
+        otcWs = subscribeOtc(otcSymbol, (tick) => { otcWsPrice = tick.price })
+      }
 
       // Real data for configured assets; OTC engine for everything else
       const realConfig = REAL_ASSETS[asset.id] ?? null
@@ -836,6 +846,9 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
       const alignedStart = (t: number) => Math.floor(t / tfSec) * tfSec
 
       const getPrice = () => {
+        // Server-authoritative: se temos tick OTC ao vivo do backend, usa ele.
+        // Cai pro engine client-side determinístico apenas como fallback (WS ainda não chegou).
+        if (otcWsPrice != null) return fmt5(otcWsPrice)
         if (!realConfig || realPrice == null) return fmt5(getOTCPrice(asset.id, nowSec(), asset.price))
         const otcBase = getOTCPrice(asset.id, nowSec(), realPrice)
         const noise   = (otcBase - realPrice) * 0.08
@@ -973,6 +986,7 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
       clearInterval(priceInterval)
       if (rafId !== null) cancelAnimationFrame(rafId)
       if (realPriceInterval) clearInterval(realPriceInterval)
+      if (otcWs) { otcWs.close(); otcWs = null }
       resizeObserver.disconnect()
       if (chartRef.current) {
         chartRef.current.remove()
