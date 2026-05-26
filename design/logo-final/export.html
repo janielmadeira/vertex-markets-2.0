@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Vertex — Logo Final & Export</title>
+<style>
+  :root {
+    --bg: #0a0d12; --card: #11151c; --border: #1f2530;
+    --text: #e6e9ef; --muted: #7a8290; --accent: #00e0a4;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, sans-serif;
+    background: var(--bg); color: var(--text);
+    padding: 40px 32px; min-height: 100vh;
+  }
+  .container { max-width: 1200px; margin: 0 auto; }
+  header { margin-bottom: 32px; }
+  h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; }
+  h2 { font-size: 16px; font-weight: 600; margin: 32px 0 14px; color: var(--text); }
+  .subtitle { color: var(--muted); margin-top: 8px; font-size: 14px; line-height: 1.6; max-width: 720px; }
+  .panel {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 14px; padding: 24px; margin-bottom: 16px;
+  }
+  .panel-light { background: #f7f8fa; color: #0a0d12; }
+  .panel-row { display: flex; align-items: center; justify-content: center; padding: 20px 0; }
+  .grid-batch {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+  }
+  .asset {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 16px;
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+  }
+  .asset .preview {
+    width: 100%; height: 120px; background: #0a0d12;
+    border-radius: 8px; display: flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border);
+  }
+  .asset .preview.light { background: #ffffff; }
+  .asset .meta { font-size: 12px; color: var(--muted); text-align: center; }
+  .asset .meta strong { color: var(--text); display: block; font-size: 13px; }
+  .btn {
+    background: var(--accent); color: #0a0d12;
+    border: none; padding: 8px 14px; border-radius: 8px;
+    font-size: 12px; font-weight: 600; cursor: pointer;
+    width: 100%;
+  }
+  .btn:hover { opacity: 0.9; }
+  .btn-secondary {
+    background: transparent; color: var(--text); border: 1px solid var(--border);
+  }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .download-all {
+    background: var(--accent); color: #0a0d12;
+    padding: 12px 20px; border-radius: 10px; border: none;
+    font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  code {
+    background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px;
+    font-size: 12px; color: var(--accent);
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Vertex — Logo Final · Preview & Export</h1>
+    <p class="subtitle">Conceito <strong>V-Reversal</strong> finalizado. SVGs vetoriais em <code>svg/</code>. Use os botões abaixo pra baixar PNGs em qualquer tamanho — gerado direto no navegador, sem precisar instalar nada.</p>
+  </header>
+
+  <h2>Lockup (símbolo + wordmark)</h2>
+
+  <div class="panel">
+    <div class="panel-row">
+      <object id="lockup-dark" type="image/svg+xml" data="svg/vertex-lockup-dark.svg" width="500"></object>
+    </div>
+  </div>
+  <div class="panel panel-light">
+    <div class="panel-row">
+      <object id="lockup-light" type="image/svg+xml" data="svg/vertex-lockup-light.svg" width="500"></object>
+    </div>
+  </div>
+
+  <h2>Exports PNG (clica pra baixar)</h2>
+  <div class="grid-batch" id="exports"></div>
+
+  <div style="margin-top: 24px;">
+    <button class="download-all" onclick="downloadAll()">Baixar todos PNGs de uma vez</button>
+  </div>
+</div>
+
+<canvas id="canvas" style="display:none"></canvas>
+
+<script>
+const assets = [
+  { file: 'vertex-symbol.svg',             label: 'Symbol · App icon',       size: 1024, bg: '#0a0d12' },
+  { file: 'vertex-symbol.svg',             label: 'Symbol · App icon',       size: 512,  bg: '#0a0d12' },
+  { file: 'vertex-symbol.svg',             label: 'Symbol · App icon',       size: 256,  bg: '#0a0d12' },
+  { file: 'vertex-symbol.svg',             label: 'Symbol · Android',        size: 192,  bg: '#0a0d12' },
+  { file: 'vertex-symbol.svg',             label: 'Symbol · iOS',            size: 180,  bg: '#0a0d12' },
+  { file: 'vertex-symbol.svg',             label: 'Symbol · Favicon',        size: 64,   bg: '#0a0d12' },
+  { file: 'vertex-symbol.svg',             label: 'Symbol · Favicon',        size: 32,   bg: '#0a0d12' },
+  { file: 'vertex-symbol.svg',             label: 'Symbol · Favicon',        size: 16,   bg: '#0a0d12' },
+  { file: 'vertex-symbol.svg',             label: 'Symbol · Transparent',    size: 1024, bg: 'transparent' },
+  { file: 'vertex-lockup-dark.svg',        label: 'Lockup Dark · Hero',      size: 1920, bg: '#0a0d12', vb: '380x100' },
+  { file: 'vertex-lockup-dark.svg',        label: 'Lockup Dark · OG image',  size: 1200, bg: '#0a0d12', vb: '380x100' },
+  { file: 'vertex-lockup-dark.svg',        label: 'Lockup Dark · Navbar',    size: 600,  bg: '#0a0d12', vb: '380x100' },
+  { file: 'vertex-lockup-light.svg',       label: 'Lockup Light · Print',    size: 1920, bg: '#ffffff', vb: '380x100' },
+  { file: 'vertex-lockup-light.svg',       label: 'Lockup Light · Doc',      size: 600,  bg: '#ffffff', vb: '380x100' },
+  { file: 'vertex-symbol-mono-white.svg',  label: 'Mono White · Watermark',  size: 512,  bg: 'transparent' },
+  { file: 'vertex-symbol-mono-black.svg',  label: 'Mono Black · Print',      size: 512,  bg: 'transparent' },
+];
+
+async function renderToPng(svgFile, targetSize, bg, viewBoxOverride) {
+  const res = await fetch('svg/' + svgFile);
+  const svgText = await res.text();
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(svgText, 'image/svg+xml');
+  const svg = doc.documentElement;
+  const vb = (viewBoxOverride || svg.getAttribute('viewBox') || '0 0 100 100').split(/[\s,]+/).map(Number);
+  const ratio = vb[2] / vb[3]; // w/h from viewBox
+  const w = Math.round(targetSize);
+  const h = Math.round(targetSize / ratio);
+
+  const blob = new Blob([new XMLSerializer().serializeToString(svg)], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const img = new Image();
+  await new Promise((resolve, reject) => {
+    img.onload = resolve;
+    img.onerror = reject;
+    img.src = url;
+  });
+
+  const canvas = document.getElementById('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, w, h);
+  if (bg && bg !== 'transparent') {
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+  }
+  ctx.drawImage(img, 0, 0, w, h);
+  URL.revokeObjectURL(url);
+  return canvas.toDataURL('image/png');
+}
+
+function getFilename(asset) {
+  const base = asset.file.replace('.svg', '');
+  return `${base}-${asset.size}.png`;
+}
+
+function buildExports() {
+  const container = document.getElementById('exports');
+  assets.forEach((a, i) => {
+    const card = document.createElement('div');
+    card.className = 'asset';
+    const isLight = a.bg === '#ffffff' || a.file.includes('light') || a.file.includes('mono-black');
+    card.innerHTML = `
+      <div class="preview ${isLight ? 'light' : ''}">
+        <img id="thumb-${i}" style="max-width:90%; max-height:90%;" alt="${a.label}">
+      </div>
+      <div class="meta">
+        <strong>${a.size}px</strong>
+        ${a.label}
+      </div>
+      <div class="actions">
+        <button class="btn" onclick="downloadOne(${i})">Baixar PNG</button>
+      </div>
+    `;
+    container.appendChild(card);
+
+    renderToPng(a.file, Math.min(a.size, 200), a.bg, a.vb).then(dataUrl => {
+      document.getElementById(`thumb-${i}`).src = dataUrl;
+    });
+  });
+}
+
+async function downloadOne(i) {
+  const a = assets[i];
+  const dataUrl = await renderToPng(a.file, a.size, a.bg, a.vb);
+  const link = document.createElement('a');
+  link.href = dataUrl;
+  link.download = getFilename(a);
+  link.click();
+}
+
+async function downloadAll() {
+  for (let i = 0; i < assets.length; i++) {
+    await downloadOne(i);
+    await new Promise(r => setTimeout(r, 150));
+  }
+}
+
+buildExports();
+</script>
+</body>
+</html>

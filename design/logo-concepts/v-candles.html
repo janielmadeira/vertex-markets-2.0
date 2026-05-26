@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Vertex — V de Candles · 3 execuções</title>
+<style>
+  :root {
+    --bg: #0a0d12;
+    --card: #11151c;
+    --border: #1f2530;
+    --text: #e6e9ef;
+    --muted: #7a8290;
+    --accent: #00e0a4;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, sans-serif;
+    background: var(--bg); color: var(--text);
+    padding: 48px 32px; min-height: 100vh;
+  }
+  header { max-width: 1280px; margin: 0 auto 32px; }
+  h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; }
+  .subtitle { color: var(--muted); margin-top: 8px; font-size: 14px; line-height: 1.6; max-width: 720px; }
+  .grid {
+    max-width: 1280px; margin: 0 auto;
+    display: grid; grid-template-columns: 1fr; gap: 20px;
+  }
+  .concept {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 16px; overflow: hidden;
+  }
+  .concept-header {
+    padding: 18px 24px; border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .concept-title { font-size: 16px; font-weight: 600; }
+  .concept-tag {
+    font-size: 11px; color: var(--accent);
+    background: rgba(0, 224, 164, 0.1);
+    padding: 4px 10px; border-radius: 999px;
+    font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr 0.6fr;
+    border-bottom: 1px solid var(--border);
+  }
+  .row:last-of-type { border-bottom: none; }
+  .cell {
+    padding: 40px 24px;
+    display: flex; align-items: center; justify-content: center;
+    border-right: 1px solid var(--border);
+    min-height: 180px;
+  }
+  .cell:last-child { border-right: none; }
+  .cell.light { background: #f7f8fa; }
+  .cell-label {
+    position: absolute; top: 8px; left: 12px;
+    font-size: 10px; color: var(--muted);
+    letter-spacing: 0.1em; text-transform: uppercase;
+  }
+  .cell-wrap { position: relative; width: 100%; display: flex; align-items: center; justify-content: center; }
+  .icons {
+    display: flex; gap: 14px; align-items: center;
+  }
+  .icon-box {
+    background: #0a0d12; border: 1px solid var(--border);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .b48 { width: 48px; height: 48px; }
+  .b32 { width: 32px; height: 32px; border-radius: 8px; }
+  .b20 { width: 20px; height: 20px; border-radius: 5px; }
+  .desc {
+    padding: 16px 24px 22px; color: var(--muted);
+    font-size: 13px; line-height: 1.65;
+  }
+  .desc strong { color: var(--text); font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Vertex — V de Candles · 3 execuções</h1>
+  <p class="subtitle">Combinando Apex Gradient + Candle Stack. Cada candle é uma vela de trading, e juntas formam um V (padrão de reversão clássico). Escolha a execução que mais conversa com a marca.</p>
+</header>
+
+<div class="grid">
+
+  <!-- EXEC A: TOPS dos candles traçam o V -->
+  <div class="concept">
+    <div class="concept-header">
+      <div class="concept-title">A · V-Reversal (tops dos candles formam o V)</div>
+      <div class="concept-tag">Mais legível</div>
+    </div>
+    <div class="row">
+      <div class="cell">
+        <svg width="380" height="100" viewBox="0 0 380 100" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="ga-g" x1="0" y1="1" x2="1" y2="0">
+              <stop offset="0%" stop-color="#00e0a4"/>
+              <stop offset="100%" stop-color="#00b3ff"/>
+            </linearGradient>
+          </defs>
+          <!-- Candles descendentes (vermelhos) -->
+          <g>
+            <line x1="9"  y1="6"  x2="9"  y2="80" stroke="#ff4d6d" stroke-width="1.5"/>
+            <rect x="5"  y="14" width="8" height="62" rx="1.5" fill="#ff4d6d"/>
+
+            <line x1="22" y1="14" x2="22" y2="80" stroke="#ff4d6d" stroke-width="1.5"/>
+            <rect x="18" y="24" width="8" height="48" rx="1.5" fill="#ff4d6d"/>
+
+            <line x1="35" y1="24" x2="35" y2="80" stroke="#ff4d6d" stroke-width="1.5"/>
+            <rect x="31" y="34" width="8" height="36" rx="1.5" fill="#ff4d6d"/>
+          </g>
+          <!-- Candle pivot (centro/menor) -->
+          <line x1="48" y1="44" x2="48" y2="80" stroke="#7a8290" stroke-width="1.5"/>
+          <rect x="44" y="54" width="8" height="20" rx="1.5" fill="#7a8290"/>
+
+          <!-- Candles ascendentes (verde→gradiente) -->
+          <g>
+            <line x1="61" y1="32" x2="61" y2="80" stroke="url(#ga-g)" stroke-width="1.5"/>
+            <rect x="57" y="40" width="8" height="34" rx="1.5" fill="url(#ga-g)"/>
+
+            <line x1="74" y1="20" x2="74" y2="80" stroke="url(#ga-g)" stroke-width="1.5"/>
+            <rect x="70" y="28" width="8" height="46" rx="1.5" fill="url(#ga-g)"/>
+
+            <line x1="87" y1="6"  x2="87" y2="80" stroke="url(#ga-g)" stroke-width="1.5"/>
+            <rect x="83" y="14" width="8" height="62" rx="1.5" fill="url(#ga-g)"/>
+          </g>
+
+          <text x="110" y="50" font-family="-apple-system, Inter, sans-serif" font-size="28" font-weight="700" fill="#ffffff" letter-spacing="2">VERTEX</text>
+          <text x="111" y="68" font-family="-apple-system, Inter, sans-serif" font-size="9" font-weight="500" fill="#7a8290" letter-spacing="4">WEB TRADING PLATFORM</text>
+        </svg>
+      </div>
+      <div class="cell light">
+        <svg width="280" height="100" viewBox="0 0 380 100" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="ga-gl" x1="0" y1="1" x2="1" y2="0">
+              <stop offset="0%" stop-color="#00a878"/>
+              <stop offset="100%" stop-color="#0089cc"/>
+            </linearGradient>
+          </defs>
+          <g>
+            <line x1="9"  y1="6"  x2="9"  y2="80" stroke="#e63946" stroke-width="1.5"/>
+            <rect x="5"  y="14" width="8" height="62" rx="1.5" fill="#e63946"/>
+            <line x1="22" y1="14" x2="22" y2="80" stroke="#e63946" stroke-width="1.5"/>
+            <rect x="18" y="24" width="8" height="48" rx="1.5" fill="#e63946"/>
+            <line x1="35" y1="24" x2="35" y2="80" stroke="#e63946" stroke-width="1.5"/>
+            <rect x="31" y="34" width="8" height="36" rx="1.5" fill="#e63946"/>
+          </g>
+          <line x1="48" y1="44" x2="48" y2="80" stroke="#6b7380" stroke-width="1.5"/>
+          <rect x="44" y="54" width="8" height="20" rx="1.5" fill="#6b7380"/>
+          <g>
+            <line x1="61" y1="32" x2="61" y2="80" stroke="url(#ga-gl)" stroke-width="1.5"/>
+            <rect x="57" y="40" width="8" height="34" rx="1.5" fill="url(#ga-gl)"/>
+            <line x1="74" y1="20" x2="74" y2="80" stroke="url(#ga-gl)" stroke-width="1.5"/>
+            <rect x="70" y="28" width="8" height="46" rx="1.5" fill="url(#ga-gl)"/>
+            <line x1="87" y1="6"  x2="87" y2="80" stroke="url(#ga-gl)" stroke-width="1.5"/>
+            <rect x="83" y="14" width="8" height="62" rx="1.5" fill="url(#ga-gl)"/>
+          </g>
+          <text x="110" y="50" font-family="-apple-system, Inter, sans-serif" font-size="28" font-weight="700" fill="#0a0d12" letter-spacing="2">VERTEX</text>
+          <text x="111" y="68" font-family="-apple-system, Inter, sans-serif" font-size="9" font-weight="500" fill="#6b7380" letter-spacing="4">WEB TRADING PLATFORM</text>
+        </svg>
+      </div>
+      <div class="cell">
+        <div class="icons">
+          <div class="icon-box b48">
+            <svg width="34" height="34" viewBox="0 0 100 100"><defs><linearGradient id="ga-i" x1="0" y1="1" x2="1" y2="0"><stop offset="0%" stop-color="#00e0a4"/><stop offset="100%" stop-color="#00b3ff"/></linearGradient></defs>
+              <line x1="9"  y1="6"  x2="9"  y2="92" stroke="#ff4d6d" stroke-width="1.5"/><rect x="5"  y="14" width="8" height="72" rx="1.5" fill="#ff4d6d"/>
+              <line x1="22" y1="16" x2="22" y2="92" stroke="#ff4d6d" stroke-width="1.5"/><rect x="18" y="26" width="8" height="56" rx="1.5" fill="#ff4d6d"/>
+              <line x1="35" y1="28" x2="35" y2="92" stroke="#ff4d6d" stroke-width="1.5"/><rect x="31" y="38" width="8" height="40" rx="1.5" fill="#ff4d6d"/>
+              <line x1="48" y1="50" x2="48" y2="92" stroke="#7a8290" stroke-width="1.5"/><rect x="44" y="60" width="8" height="22" rx="1.5" fill="#7a8290"/>
+              <line x1="61" y1="36" x2="61" y2="92" stroke="url(#ga-i)" stroke-width="1.5"/><rect x="57" y="44" width="8" height="38" rx="1.5" fill="url(#ga-i)"/>
+              <line x1="74" y1="22" x2="74" y2="92" stroke="url(#ga-i)" stroke-width="1.5"/><rect x="70" y="30" width="8" height="52" rx="1.5" fill="url(#ga-i)"/>
+              <line x1="87" y1="6"  x2="87" y2="92" stroke="url(#ga-i)" stroke-width="1.5"/><rect x="83" y="14" width="8" height="72" rx="1.5" fill="url(#ga-i)"/>
+            </svg>
+          </div>
+          <div class="icon-box b32">
+            <svg width="22" height="22" viewBox="0 0 100 100">
+              <rect x="5"  y="14" width="8" height="72" rx="1.5" fill="#ff4d6d"/>
+              <rect x="18" y="26" width="8" height="56" rx="1.5" fill="#ff4d6d"/>
+              <rect x="31" y="38" width="8" height="40" rx="1.5" fill="#ff4d6d"/>
+              <rect x="44" y="60" width="8" height="22" rx="1.5" fill="#7a8290"/>
+              <rect x="57" y="44" width="8" height="38" rx="1.5" fill="url(#ga-i)"/>
+              <rect x="70" y="30" width="8" height="52" rx="1.5" fill="url(#ga-i)"/>
+              <rect x="83" y="14" width="8" height="72" rx="1.5" fill="url(#ga-i)"/>
+            </svg>
+          </div>
+          <div class="icon-box b20">
+            <svg width="14" height="14" viewBox="0 0 100 100">
+              <rect x="5"  y="14" width="8" height="72" rx="1.5" fill="#ff4d6d"/>
+              <rect x="18" y="26" width="8" height="56" rx="1.5" fill="#ff4d6d"/>
+              <rect x="31" y="38" width="8" height="40" rx="1.5" fill="#ff4d6d"/>
+              <rect x="44" y="60" width="8" height="22" rx="1.5" fill="#7a8290"/>
+              <rect x="57" y="44" width="8" height="38" rx="1.5" fill="url(#ga-i)"/>
+              <rect x="70" y="30" width="8" height="52" rx="1.5" fill="url(#ga-i)"/>
+              <rect x="83" y="14" width="8" height="72" rx="1.5" fill="url(#ga-i)"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="desc"><strong>Como funciona:</strong> 7 candles — 3 vermelhos descendo, 1 cinza no pivot, 3 verdes subindo. Os topos desenham o V. Conta literalmente a história de uma reversão de mercado (V-bottom).<br><strong>Trade-off:</strong> muito detalhe — em 16px o V some um pouco. Excelente em tamanhos médio/grande.</div>
+  </div>
+
+  <!-- EXEC B: V SÓLIDO com textura de candles dentro -->
+  <div class="concept">
+    <div class="concept-header">
+      <div class="concept-title">B · V sólido com candles internos (negative space)</div>
+      <div class="concept-tag">Mais icônico</div>
+    </div>
+    <div class="row">
+      <div class="cell">
+        <svg width="380" height="100" viewBox="0 0 380 100" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="gb-g" x1="0" y1="1" x2="1" y2="0">
+              <stop offset="0%" stop-color="#00e0a4"/>
+              <stop offset="100%" stop-color="#00b3ff"/>
+            </linearGradient>
+            <clipPath id="gb-clip">
+              <path d="M6 12 L42 80 L54 80 L90 12 L78 12 L48 68 L18 12 Z"/>
+            </clipPath>
+          </defs>
+          <!-- V de fundo em gradiente -->
+          <path d="M6 12 L42 80 L54 80 L90 12 L78 12 L48 68 L18 12 Z" fill="url(#gb-g)"/>
+          <!-- Candles brancos cortados pela máscara do V -->
+          <g clip-path="url(#gb-clip)" opacity="0.95">
+            <rect x="12" y="14" width="6" height="70" fill="#0a0d12"/>
+            <rect x="28" y="30" width="6" height="54" fill="#0a0d12"/>
+            <rect x="44" y="48" width="6" height="36" fill="#0a0d12"/>
+            <rect x="60" y="30" width="6" height="54" fill="#0a0d12"/>
+            <rect x="76" y="14" width="6" height="70" fill="#0a0d12"/>
+          </g>
+          <text x="110" y="50" font-family="-apple-system, Inter, sans-serif" font-size="28" font-weight="700" fill="#ffffff" letter-spacing="2">VERTEX</text>
+          <text x="111" y="68" font-family="-apple-system, Inter, sans-serif" font-size="9" font-weight="500" fill="#7a8290" letter-spacing="4">WEB TRADING PLATFORM</text>
+        </svg>
+      </div>
+      <div class="cell light">
+        <svg width="280" height="100" viewBox="0 0 380 100" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="gb-gl" x1="0" y1="1" x2="1" y2="0">
+              <stop offset="0%" stop-color="#00a878"/>
+              <stop offset="100%" stop-color="#0089cc"/>
+            </linearGradient>
+            <clipPath id="gb-clipl">
+              <path d="M6 12 L42 80 L54 80 L90 12 L78 12 L48 68 L18 12 Z"/>
+            </clipPath>
+          </defs>
+          <path d="M6 12 L42 80 L54 80 L90 12 L78 12 L48 68 L18 12 Z" fill="url(#gb-gl)"/>
+          <g clip-path="url(#gb-clipl)" opacity="0.95">
+            <rect x="12" y="14" width="6" height="70" fill="#f7f8fa"/>
+            <rect x="28" y="30" width="6" height="54" fill="#f7f8fa"/>
+            <rect x="44" y="48" width="6" height="36" fill="#f7f8fa"/>
+            <rect x="60" y="30" width="6" height="54" fill="#f7f8fa"/>
+            <rect x="76" y="14" width="6" height="70" fill="#f7f8fa"/>
+          </g>
+          <text x="110" y="50" font-family="-apple-system, Inter, sans-serif" font-size="28" font-weight="700" fill="#0a0d12" letter-spacing="2">VERTEX</text>
+          <text x="111" y="68" font-family="-apple-system, Inter, sans-serif" font-size="9" font-weight="500" fill="#6b7380" letter-spacing="4">WEB TRADING PLATFORM</text>
+        </svg>
+      </div>
+      <div class="cell">
+        <div class="icons">
+          <div class="icon-box b48">
+            <svg width="34" height="34" viewBox="0 0 100 100"><defs><linearGradient id="gb-i" x1="0" y1="1" x2="1" y2="0"><stop offset="0%" stop-color="#00e0a4"/><stop offset="100%" stop-color="#00b3ff"/></linearGradient><clipPath id="gb-ic"><path d="M6 12 L42 86 L58 86 L94 12 L80 12 L50 72 L20 12 Z"/></clipPath></defs>
+              <path d="M6 12 L42 86 L58 86 L94 12 L80 12 L50 72 L20 12 Z" fill="url(#gb-i)"/>
+              <g clip-path="url(#gb-ic)"><rect x="14" y="14" width="6" height="76" fill="#0a0d12"/><rect x="30" y="30" width="6" height="60" fill="#0a0d12"/><rect x="46" y="50" width="6" height="40" fill="#0a0d12"/><rect x="62" y="30" width="6" height="60" fill="#0a0d12"/><rect x="78" y="14" width="6" height="76" fill="#0a0d12"/></g>
+            </svg>
+          </div>
+          <div class="icon-box b32">
+            <svg width="22" height="22" viewBox="0 0 100 100"><path d="M6 12 L42 86 L58 86 L94 12 L80 12 L50 72 L20 12 Z" fill="url(#gb-i)"/></svg>
+          </div>
+          <div class="icon-box b20">
+            <svg width="14" height="14" viewBox="0 0 100 100"><path d="M6 12 L42 86 L58 86 L94 12 L80 12 L50 72 L20 12 Z" fill="url(#gb-i)"/></svg>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="desc"><strong>Como funciona:</strong> V sólido em gradiente, com 5 candles em negative space cortados dentro. Os candles aparecem em tamanhos médios formando o ritmo V-reversal sutilmente.<br><strong>Trade-off:</strong> em tamanhos pequenos vira só um V (os candles somem) — mas isso é bom, porque escala como ícone limpo.</div>
+  </div>
+
+  <!-- EXEC C: Candles inclinados FORMAM as linhas do V -->
+  <div class="concept">
+    <div class="concept-header">
+      <div class="concept-title">C · Candles inclinados desenham o V</div>
+      <div class="concept-tag">Mais ousado</div>
+    </div>
+    <div class="row">
+      <div class="cell">
+        <svg width="380" height="100" viewBox="0 0 380 100" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="gc-g" x1="0" y1="1" x2="1" y2="0">
+              <stop offset="0%" stop-color="#00e0a4"/>
+              <stop offset="100%" stop-color="#00b3ff"/>
+            </linearGradient>
+          </defs>
+          <!-- Linha esquerda do V: 3 candles descendentes vermelhos inclinados -->
+          <g transform="translate(8, 14) rotate(36)">
+            <rect x="0"  y="0"  width="9" height="22" rx="1.5" fill="#ff4d6d"/>
+            <rect x="0"  y="26" width="9" height="22" rx="1.5" fill="#ff4d6d"/>
+            <rect x="0"  y="52" width="9" height="22" rx="1.5" fill="#ff4d6d"/>
+          </g>
+          <!-- Linha direita do V: 3 candles ascendentes verdes inclinados -->
+          <g transform="translate(88, 14) rotate(-36)">
+            <rect x="0"  y="0"  width="9" height="22" rx="1.5" fill="url(#gc-g)"/>
+            <rect x="0"  y="26" width="9" height="22" rx="1.5" fill="url(#gc-g)"/>
+            <rect x="0"  y="52" width="9" height="22" rx="1.5" fill="url(#gc-g)"/>
+          </g>
+          <!-- Spark/dot no topo direito (referência ao Apex) -->
+          <circle cx="92" cy="14" r="3.5" fill="#00e0a4"/>
+
+          <text x="115" y="50" font-family="-apple-system, Inter, sans-serif" font-size="28" font-weight="700" fill="#ffffff" letter-spacing="2">VERTEX</text>
+          <text x="116" y="68" font-family="-apple-system, Inter, sans-serif" font-size="9" font-weight="500" fill="#7a8290" letter-spacing="4">WEB TRADING PLATFORM</text>
+        </svg>
+      </div>
+      <div class="cell light">
+        <svg width="280" height="100" viewBox="0 0 380 100" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="gc-gl" x1="0" y1="1" x2="1" y2="0">
+              <stop offset="0%" stop-color="#00a878"/>
+              <stop offset="100%" stop-color="#0089cc"/>
+            </linearGradient>
+          </defs>
+          <g transform="translate(8, 14) rotate(36)">
+            <rect x="0"  y="0"  width="9" height="22" rx="1.5" fill="#e63946"/>
+            <rect x="0"  y="26" width="9" height="22" rx="1.5" fill="#e63946"/>
+            <rect x="0"  y="52" width="9" height="22" rx="1.5" fill="#e63946"/>
+          </g>
+          <g transform="translate(88, 14) rotate(-36)">
+            <rect x="0"  y="0"  width="9" height="22" rx="1.5" fill="url(#gc-gl)"/>
+            <rect x="0"  y="26" width="9" height="22" rx="1.5" fill="url(#gc-gl)"/>
+            <rect x="0"  y="52" width="9" height="22" rx="1.5" fill="url(#gc-gl)"/>
+          </g>
+          <circle cx="92" cy="14" r="3.5" fill="#00a878"/>
+          <text x="115" y="50" font-family="-apple-system, Inter, sans-serif" font-size="28" font-weight="700" fill="#0a0d12" letter-spacing="2">VERTEX</text>
+          <text x="116" y="68" font-family="-apple-system, Inter, sans-serif" font-size="9" font-weight="500" fill="#6b7380" letter-spacing="4">WEB TRADING PLATFORM</text>
+        </svg>
+      </div>
+      <div class="cell">
+        <div class="icons">
+          <div class="icon-box b48">
+            <svg width="34" height="34" viewBox="0 0 100 100"><defs><linearGradient id="gc-i" x1="0" y1="1" x2="1" y2="0"><stop offset="0%" stop-color="#00e0a4"/><stop offset="100%" stop-color="#00b3ff"/></linearGradient></defs>
+              <g transform="translate(12, 12) rotate(36)">
+                <rect x="0"  y="0"  width="11" height="26" rx="2" fill="#ff4d6d"/>
+                <rect x="0"  y="30" width="11" height="26" rx="2" fill="#ff4d6d"/>
+                <rect x="0"  y="60" width="11" height="26" rx="2" fill="#ff4d6d"/>
+              </g>
+              <g transform="translate(88, 12) rotate(-36)">
+                <rect x="0"  y="0"  width="11" height="26" rx="2" fill="url(#gc-i)"/>
+                <rect x="0"  y="30" width="11" height="26" rx="2" fill="url(#gc-i)"/>
+                <rect x="0"  y="60" width="11" height="26" rx="2" fill="url(#gc-i)"/>
+              </g>
+              <circle cx="92" cy="12" r="4" fill="#00e0a4"/>
+            </svg>
+          </div>
+          <div class="icon-box b32">
+            <svg width="22" height="22" viewBox="0 0 100 100">
+              <g transform="translate(12, 12) rotate(36)">
+                <rect x="0"  y="0"  width="11" height="26" rx="2" fill="#ff4d6d"/>
+                <rect x="0"  y="30" width="11" height="26" rx="2" fill="#ff4d6d"/>
+                <rect x="0"  y="60" width="11" height="26" rx="2" fill="#ff4d6d"/>
+              </g>
+              <g transform="translate(88, 12) rotate(-36)">
+                <rect x="0"  y="0"  width="11" height="26" rx="2" fill="url(#gc-i)"/>
+                <rect x="0"  y="30" width="11" height="26" rx="2" fill="url(#gc-i)"/>
+                <rect x="0"  y="60" width="11" height="26" rx="2" fill="url(#gc-i)"/>
+              </g>
+            </svg>
+          </div>
+          <div class="icon-box b20">
+            <svg width="14" height="14" viewBox="0 0 100 100">
+              <g transform="translate(12, 12) rotate(36)">
+                <rect x="0"  y="0"  width="11" height="26" rx="2" fill="#ff4d6d"/>
+                <rect x="0"  y="30" width="11" height="26" rx="2" fill="#ff4d6d"/>
+                <rect x="0"  y="60" width="11" height="26" rx="2" fill="#ff4d6d"/>
+              </g>
+              <g transform="translate(88, 12) rotate(-36)">
+                <rect x="0"  y="0"  width="11" height="26" rx="2" fill="url(#gc-i)"/>
+                <rect x="0"  y="30" width="11" height="26" rx="2" fill="url(#gc-i)"/>
+                <rect x="0"  y="60" width="11" height="26" rx="2" fill="url(#gc-i)"/>
+              </g>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="desc"><strong>Como funciona:</strong> 6 candles inclinados — 3 vermelhos formam o traço esquerdo, 3 com gradiente formam o direito. O spark do Apex Gradient mantido no topo. Cada traço do V é literalmente "feito de" candles.<br><strong>Trade-off:</strong> mais único visualmente, mas exige um segundo de leitura. Diferenciação alta no mercado.</div>
+  </div>
+
+</div>
+
+</body>
+</html>
