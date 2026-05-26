@@ -1,8 +1,8 @@
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
-import jwt from '@fastify/jwt'
 import cookie from '@fastify/cookie'
 import websocket from '@fastify/websocket'
+import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose'
 import { authRoutes } from './auth/routes.js'
 import { operationRoutes } from './operations/routes.js'
 import { accountRoutes } from './accounts/routes.js'
@@ -41,27 +41,35 @@ export async function buildApp() {
   await app.register(cookie)
   await app.register(websocket)
 
-  // JWT: agora valida tokens emitidos pelo Supabase Auth.
-  // SUPABASE_JWT_SECRET vem do painel Supabase > Settings > API > JWT Secret.
-  const jwtSecret = process.env.SUPABASE_JWT_SECRET ?? process.env.JWT_SECRET
-  if (!jwtSecret) throw new Error('SUPABASE_JWT_SECRET (ou JWT_SECRET) precisa estar no .env')
-  await app.register(jwt, {
-    secret: jwtSecret,
-    verify: { algorithms: ['HS256'] },
-  })
+  // ── JWT via JWKS (Supabase Auth) ──────────────────────────────────────────
+  // Supabase migrou para chaves assimetricas (ECC P-256). O JWKS endpoint expoe
+  // a chave atual + chaves anteriores ainda usadas para verificar tokens nao expirados.
+  // jose cacheia o JWKS em memoria e revalida automaticamente quando aparece um
+  // 'kid' desconhecido. Sem precisar de segredo no .env.
+  const supabaseUrl = process.env.SUPABASE_URL
+  if (!supabaseUrl) throw new Error('SUPABASE_URL precisa estar no .env (ex: https://yilmbwrfaljxgvsygmyz.supabase.co)')
+  const jwks = createRemoteJWKSet(new URL(`${supabaseUrl}/auth/v1/.well-known/jwks.json`))
 
   // ── Auth decorator ─────────────────────────────────────────────────────────
   app.decorate('authenticate', async (req: any, reply: any) => {
+    const header = req.headers.authorization
+    if (!header?.startsWith('Bearer ')) {
+      return reply.status(401).send({ error: 'UNAUTHORIZED' })
+    }
+    const token = header.slice(7).trim()
     try {
-      await req.jwtVerify()
-    } catch {
-      reply.status(401).send({ error: 'UNAUTHORIZED' })
+      const { payload } = await jwtVerify(token, jwks, {
+        audience: 'authenticated',
+        algorithms: ['ES256', 'RS256', 'HS256'],
+      })
+      req.user = payload as JWTPayload & { sub: string; email?: string }
+    } catch (err: any) {
+      req.log.debug({ err: err.message }, 'JWT verify failed')
+      return reply.status(401).send({ error: 'UNAUTHORIZED' })
     }
   })
 
   // ── Admin guard ───────────────────────────────────────────────────────────
-  // Admin agora vive na tabela public.admin_users (FK p/ auth.users.id).
-  // Existencia da linha = admin. Coluna 'role' distingue admin vs super_admin.
   app.decorate('requireAdmin', async (req: any, reply: any) => {
     const sub = req.user?.sub as string | undefined
     if (!sub) return reply.status(401).send({ error: 'UNAUTHORIZED' })
