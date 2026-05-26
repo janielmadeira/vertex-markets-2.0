@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
 import { Suspense } from 'react'
 import './globals.css'
@@ -10,6 +10,15 @@ const inter = Inter({ subsets: ['latin'] })
 export const metadata: Metadata = {
   title: 'Vertex Markets',
   description: 'Plataforma de negociação de opções digitais',
+}
+
+// Bloqueia pinch-to-zoom da página inteira para o chart capturar o gesto.
+// Trading apps tipicamente desativam zoom da página — usuário pincha no gráfico.
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

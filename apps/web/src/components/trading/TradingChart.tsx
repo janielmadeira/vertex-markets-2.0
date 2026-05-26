@@ -427,8 +427,20 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
   useEffect(() => {
     if (!chartRef.current) return
     chartRef.current.applyOptions({
-      kineticScroll: { touch: !performanceMode, mouse: !performanceMode },
-      handleScale: { axisPressedMouseMove: !performanceMode },
+      // Touch kinetic scroll fica SEMPRE on — momentum no celular não é problema
+      // de performance, é UX essencial. performanceMode controla só mouse/axis drag.
+      kineticScroll: { touch: true, mouse: !performanceMode },
+      handleScale: {
+        axisPressedMouseMove: !performanceMode,
+        pinch: true,
+        mouseWheel: true,
+      },
+      handleScroll: {
+        horzTouchDrag: true,
+        vertTouchDrag: false,
+        pressedMouseMove: true,
+        mouseWheel: true,
+      },
     })
   }, [performanceMode])
 
@@ -1756,11 +1768,12 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
         />
       )}
 
-      {/* Chart — absolute so oscillator panel doesn't depend on flex shrink */}
+      {/* Chart — absolute so oscillator panel doesn't depend on flex shrink.
+          touch-action:none cede 100% dos gestos pro lightweight-charts (pan + pinch). */}
       <div
         ref={chartContainerRef}
         className="absolute inset-0"
-        style={{ bottom: oscActive ? 130 : 0 }}
+        style={{ bottom: oscActive ? 130 : 0, touchAction: 'none' }}
       />
 
       {/* Oscillator sub-panel — absolute at the bottom */}

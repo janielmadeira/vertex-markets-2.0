@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { Minus, Plus, ArrowUp, ArrowDown, RefreshCw, ChevronDown, ChevronUp, ArrowLeftRight, Package, X } from 'lucide-react'
 import { ASSETS, getOTCPrice, type Asset, type OpenTrade, type ActiveTrade } from '@/lib/mockData'
 import { cn } from '@/lib/utils'
@@ -19,6 +19,14 @@ interface TradingPanelProps {
   onTradeExpired?: (id: string) => void
   livePrice?: number | null
   livePriceRef?: React.MutableRefObject<number | null>
+  /** Quando true, esconde o painel visualmente mas mantém estado/timers vivos */
+  hidden?: boolean
+}
+
+export interface TradingPanelHandle {
+  /** Dispara uma operação rápida usando os defaults atuais (investimento + duração) */
+  placeTrade: (direction: 'CALL' | 'PUT') => void
+  canTrade: boolean
 }
 
 interface ClosedTrade {
@@ -176,7 +184,7 @@ function TradeItem({ trade, shortLabels, currentPrice, onDoubleUp, onEarlyClose 
   )
 }
 
-export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, mobile = false, accountId, onTradeOpened, onTradeExpired, livePrice, livePriceRef: externalPriceRef }: TradingPanelProps) {
+export const TradingPanel = forwardRef<TradingPanelHandle, TradingPanelProps>(function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, mobile = false, accountId, onTradeOpened, onTradeExpired, livePrice, livePriceRef: externalPriceRef, hidden = false }, ref) {
   const [investment, setInvestment] = useState(50)
   const [investmentRaw, setInvestmentRaw] = useState('')
   const [editingInvestment, setEditingInvestment] = useState(false)
@@ -566,8 +574,23 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
     setTimeIndex(i => Math.max(0, Math.min(TIME_OPTIONS.length - 1, i + delta)))
   }
 
+  // Expõe placeTrade pro pai (usado pelo MobileTradingSheet pra disparar trade
+  // a partir dos botões rápidos sem expandir o painel)
+  useImperativeHandle(ref, () => ({
+    placeTrade: (direction: 'CALL' | 'PUT') => {
+      if (placing || livePriceRef.current == null || !marketOpen) return
+      if (oneClickTrade) placeTrade(direction)
+      else setConfirmTrade(direction)
+    },
+    canTrade: !placing && livePrice != null && marketOpen,
+  }), [placing, livePrice, marketOpen, oneClickTrade])
+
   return (
-    <aside className={cn(mobile ? 'w-full' : 'w-[280px] flex-shrink-0 border-l border-[#2a2e3b]', 'flex flex-col bg-[#1d2130] overflow-hidden')}>
+    <aside className={cn(
+      mobile ? 'w-full' : 'w-[280px] flex-shrink-0 border-l border-[#2a2e3b]',
+      'flex flex-col bg-[#1d2130] overflow-hidden',
+      hidden && 'hidden'
+    )}>
 
       {/* Trade result popup */}
       {tradeResult && (
@@ -906,7 +929,7 @@ export function TradingPanel({ asset, oneClickTrade = true, shortLabels = true, 
       </div>
     </aside>
   )
-}
+})
 
 function EmptyState({ message }: { message: string }) {
   return (

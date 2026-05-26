@@ -25,6 +25,7 @@ import { AccountDropdown } from '@/components/layout/AccountDropdown'
 import { VertexMark } from '@/components/brand/VertexMark'
 import { ASSETS, getOTCPrice, type Asset, type ActiveTrade } from '@/lib/mockData'
 import { cn } from '@/lib/utils'
+import { useIsMobile, useIsPhoneLandscape } from '@/lib/useIsMobile'
 
 type SidebarTab = 'TRADE' | 'SUPORTE' | 'CONTA' | 'TORNEIOS' | 'MERCADO' | 'MAIS'
 
@@ -56,6 +57,8 @@ export default function TradingPage() {
   })
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('TRADE')
   const [mobileAccountOpen, setMobileAccountOpen] = useState(false)
+  const isMobile = useIsMobile()
+  const isPhoneLandscape = useIsPhoneLandscape()
   const [activeTrades, setActiveTrades] = useState<ActiveTrade[]>([])
   const [livePrice, setLivePrice] = useState<number | null>(null)
   // Ref síncrono — TradingChart escreve diretamente, TradingPanel lê sem passar por re-render
@@ -152,8 +155,8 @@ export default function TradingPage() {
   return (
     <div className="h-full bg-[#151822] overflow-hidden">
 
-      {/* ── DESKTOP layout (md+) ─────────────────────────────────────────── */}
-      <div className="hidden md:flex h-full overflow-hidden">
+      {/* ── DESKTOP layout (somente quando NÃO é mobile detectado) ──────── */}
+      <div className={cn(isMobile === false ? 'flex' : 'hidden', 'h-full overflow-hidden')}>
         <Sidebar activeTab={sidebarTab} onTabChange={setSidebarTab} onSettings={() => setConfigOpen(!configOpen)} />
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           <Header
@@ -185,11 +188,14 @@ export default function TradingPage() {
         </div>
       </div>
 
-      {/* ── MOBILE layout (< md) ─────────────────────────────────────────── */}
-      <div className="flex md:hidden h-full flex-col overflow-hidden">
+      {/* ── MOBILE layout (touch device ou janela estreita) ─────────────── */}
+      <div className={cn(isMobile === true ? 'flex' : 'hidden', 'h-full flex-col overflow-hidden')}>
 
-        {/* Mobile header */}
-        <header className="flex items-center justify-between px-4 h-12 bg-[#1d2130] border-b border-[#2a2e3b] flex-shrink-0">
+        {/* Mobile header — escondido em paisagem pra liberar tela pro gráfico */}
+        <header className={cn(
+          'items-center justify-between px-4 h-12 bg-[#1d2130] border-b border-[#2a2e3b] flex-shrink-0',
+          isPhoneLandscape ? 'hidden' : 'flex'
+        )}>
           {/* Logo */}
           <div className="flex items-center gap-2">
             <VertexMark size={24} />
@@ -270,11 +276,18 @@ export default function TradingPage() {
             asset={selectedAsset}
             oneClickTrade={tradeSettings.oneClickTrade}
             shortLabels={tradeSettings.shortLabels}
+            accountId={currentAccount?.id}
+            onTradeOpened={handleTradeOpened}
+            onTradeExpired={handleTradeExpired}
+            livePrice={livePrice}
+            livePriceRef={livePriceRef}
           />
         )}
 
-        {/* Mobile bottom navigation */}
-        <MobileNav activeTab={sidebarTab} onTabChange={setSidebarTab} />
+        {/* Mobile bottom navigation — oculto em paisagem */}
+        {!isPhoneLandscape && (
+          <MobileNav activeTab={sidebarTab} onTabChange={setSidebarTab} />
+        )}
       </div>
 
       {/* ── Global modals (shared desktop + mobile) ──────────────────────── */}
