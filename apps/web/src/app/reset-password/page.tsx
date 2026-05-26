@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import { VertexMark } from '@/components/brand/VertexMark'
 
 export default function ResetPasswordPage() {
   const router = useRouter()
@@ -67,9 +68,7 @@ export default function ResetPasswordPage() {
     <div className="relative min-h-screen bg-[#0d1117] flex flex-col overflow-hidden">
       <div className="relative z-10 flex items-center justify-center py-5 border-b border-white/5">
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 bg-white rounded flex items-center justify-center">
-            <span className="text-[#0d1117] text-xs font-black">V</span>
-          </div>
+          <VertexMark size={28} />
           <span className="text-white font-bold text-lg tracking-widest">VERTEX</span>
         </div>
       </div>

@@ -22,6 +22,7 @@ import { MaisPanel } from '@/components/layout/MaisPanel'
 import { ConfiguracoesPanel, type TradeSettings } from '@/components/layout/ConfiguracoesPanel'
 import { DepositoModal } from '@/components/deposito/DepositoModal'
 import { AccountDropdown } from '@/components/layout/AccountDropdown'
+import { VertexMark } from '@/components/brand/VertexMark'
 import { ASSETS, getOTCPrice, type Asset, type ActiveTrade } from '@/lib/mockData'
 import { cn } from '@/lib/utils'
 
@@ -191,9 +192,7 @@ export default function TradingPage() {
         <header className="flex items-center justify-between px-4 h-12 bg-[#1d2130] border-b border-[#2a2e3b] flex-shrink-0">
           {/* Logo */}
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 bg-white rounded flex items-center justify-center">
-              <span className="text-[#1d2130] text-xs font-black">V</span>
-            </div>
+            <VertexMark size={24} />
             <span className="text-white font-bold text-sm tracking-widest">VERTEX</span>
           </div>
 

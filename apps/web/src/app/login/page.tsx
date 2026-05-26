@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useAuthStore } from '@/store/auth'
 import { supabase } from '@/lib/supabase'
 import { MfaChallenge } from '@/components/auth/MfaChallenge'
+import { VertexMark } from '@/components/brand/VertexMark'
 
 const COUNTRIES = [
   'Brasil', 'Portugal', 'Angola', 'Moçambique', 'Cabo Verde',
@@ -131,9 +132,7 @@ function LoginPageInner() {
       {/* Top bar */}
       <div className="relative z-10 flex items-center justify-center py-5 border-b border-white/5">
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 bg-white rounded flex items-center justify-center">
-            <span className="text-[#0d1117] text-xs font-black">V</span>
-          </div>
+          <VertexMark size={28} />
           <span className="text-white font-bold text-lg tracking-widest">VERTEX</span>
         </div>
       </div>
