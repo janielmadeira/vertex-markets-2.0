@@ -8,6 +8,8 @@ import { ASSETS, type Asset } from '@/lib/mockData'
 interface MaisPanelProps {
   onClose: () => void
   onSelectAsset?: (asset: Asset) => void
+  /** Mobile: ocupa toda a tela em vez da coluna fixa de 240px */
+  mobile?: boolean
 }
 
 type MaisView = 'menu' | 'top' | 'sinais' | 'analise'
@@ -280,11 +282,17 @@ const MENU_ITEMS = [
   },
 ]
 
-export function MaisPanel({ onClose, onSelectAsset }: MaisPanelProps) {
+export function MaisPanel({ onClose, onSelectAsset, mobile = false }: MaisPanelProps) {
   const [view, setView] = useState<MaisView>('menu')
 
   return (
-    <div className="flex flex-col bg-[#1a1e2e] border-r border-[#2a2e3b] flex-shrink-0" style={{ width: 240 }}>
+    <div
+      className={cn(
+        'flex flex-col bg-[#1a1e2e] flex-shrink-0',
+        mobile ? 'w-full h-full' : 'border-r border-[#2a2e3b]'
+      )}
+      style={mobile ? undefined : { width: 240 }}
+    >
 
       {view === 'top' ? (
         <TopView onBack={() => setView('menu')} />

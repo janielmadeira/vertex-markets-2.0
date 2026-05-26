@@ -17,6 +17,8 @@ interface MobileTradingSheetProps {
   onTradeExpired?: (id: string) => void
   livePrice?: number | null
   livePriceRef?: React.MutableRefObject<number | null>
+  /** Disparado quando o usuário toca no chip do ativo (abre seletor de paridade) */
+  onAssetTap?: () => void
 }
 
 export function MobileTradingSheet({
@@ -28,6 +30,7 @@ export function MobileTradingSheet({
   onTradeExpired,
   livePrice,
   livePriceRef,
+  onAssetTap,
 }: MobileTradingSheetProps) {
   const [expanded, setExpanded] = useState(false)
   const panelRef = useRef<TradingPanelHandle>(null)
@@ -95,6 +98,18 @@ export function MobileTradingSheet({
           />
         </div>
 
+        {/* Chip de ativo no canto superior esquerdo (substitui o handle do sheet em paisagem) */}
+        <button
+          type="button"
+          onClick={() => onAssetTap?.()}
+          className="fixed top-2 left-2 z-40 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/60 backdrop-blur border border-white/10 active:scale-95 transition-all"
+        >
+          <FlagPair code1={asset.code1} code2={asset.code2} size={16} />
+          <span className="text-xs font-bold text-white">{asset.symbol}</span>
+          <span className="text-xs font-bold text-green-400">{asset.payout}%</span>
+          <ChevronDown size={11} className="text-[#8b8f9a]" />
+        </button>
+
         {/* Overlay flutuante de CALL/PUT no lado direito */}
         <div className="fixed right-3 top-1/2 -translate-y-1/2 z-40 flex flex-col gap-2.5 pointer-events-none">
           <button
@@ -134,29 +149,43 @@ export function MobileTradingSheet({
       )}
       style={dragging ? { height: dragHeight! } : undefined}
     >
-      {/* Handle bar — clicável + arrastável */}
+      {/* Handle bar — duas zonas tap + drag em qualquer ponto */}
       <div
-        role="button"
-        tabIndex={0}
-        onClick={() => { if (!dragging) setExpanded(v => !v) }}
         onPointerDown={onHandlePointerDown}
         onPointerMove={onHandlePointerMove}
         onPointerUp={onHandlePointerEnd}
         onPointerCancel={onHandlePointerEnd}
-        className="flex items-center justify-between px-4 py-2.5 border-b border-[#2a2e3b] flex-shrink-0 active:bg-white/5 relative cursor-grab touch-none select-none"
+        className="flex items-center justify-between px-4 py-2.5 border-b border-[#2a2e3b] flex-shrink-0 relative cursor-grab touch-none select-none"
       >
         <div className="absolute left-1/2 -translate-x-1/2 top-[7px] w-8 h-[3px] bg-[#3a3f50] rounded-full pointer-events-none" />
 
-        <div className="flex items-center gap-2">
+        {/* Zona esquerda: chip do ativo abre seletor de paridade */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            if (!dragging) onAssetTap?.()
+          }}
+          className="flex items-center gap-2 px-2 -mx-2 py-1 rounded-md active:bg-white/5"
+        >
           <FlagPair code1={asset.code1} code2={asset.code2} size={18} />
           <span className="text-sm font-bold text-white">{asset.symbol}</span>
           <span className="text-sm font-bold text-green-400">{asset.payout}%</span>
-        </div>
+          <ChevronDown size={12} className="text-[#8b8f9a]" />
+        </button>
 
-        <div className="flex items-center gap-1 text-[#8b8f9a]">
+        {/* Zona direita: expande/fecha o painel */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            if (!dragging) setExpanded(v => !v)
+          }}
+          className="flex items-center gap-1 text-[#8b8f9a] px-2 -mx-2 py-1 rounded-md active:bg-white/5"
+        >
           <span className="text-[10px] font-semibold">{expanded ? 'Fechar' : 'Negociar'}</span>
           {expanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
-        </div>
+        </button>
       </div>
 
       {/* Collapsed: quick CALL/PUT buttons — escondidos durante o drag pra revelar o painel */}

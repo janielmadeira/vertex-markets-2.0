@@ -1,11 +1,12 @@
 'use client'
 
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { Pencil, ZoomIn, ZoomOut, Crosshair, ChevronDown, Eye, Pen, X, Activity, Bell } from 'lucide-react'
+import { Pencil, ZoomIn, ZoomOut, Crosshair, ChevronDown, Eye, Pen, X, Activity, Bell, MoreHorizontal } from 'lucide-react'
 import { generateMockCandles, getOTCPrice, getAssetDecimals, type Asset, type Candle, type ActiveTrade } from '@/lib/mockData'
 import { REAL_ASSETS, tfToBinanceInterval } from '@/lib/marketSymbols'
 import { subscribeOtc, assetIdToOtcSymbol, fetchOtcCandles, OTC_BACKEND_TFS, type OtcSubscription } from '@/lib/otcClient'
 import { cn } from '@/lib/utils'
+import { useIsMobile } from '@/lib/useIsMobile'
 import { DrawingsPanel } from './DrawingsPanel'
 import { DrawingSettingsPanel } from './DrawingSettingsPanel'
 import { IndicadoresPanel } from './IndicadoresPanel'
@@ -355,6 +356,8 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
   const [indicadoresOpen, setIndicadoresOpen] = useState(false)
   const [chartType, setChartType] = useState<ChartType>('velas')
   const [chartTypeOpen, setChartTypeOpen] = useState(false)
+  const [mobileToolsOpen, setMobileToolsOpen] = useState(false)
+  const isMobile = useIsMobile() === true
   const [activeIndicators, setActiveIndicators] = useState<Set<string>>(new Set())
   const [chartKey, setChartKey] = useState(0) // incrementa cada vez que o gráfico é recriado
   const [alertSet, setAlertSet] = useState(false)
@@ -1790,9 +1793,25 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
         </div>
       )}
 
-      {/* Bottom left toolbar — vertical column */}
+      {/* Bottom left toolbar — vertical column.
+          Em mobile, colapsa em um único botão "+"; expande sob demanda. */}
       <div className="absolute left-3 flex flex-col items-start gap-1 z-10" style={{ bottom: oscActive ? 142 : 12 }}>
-        {/* Pencil / Drawings */}
+        {/* Botão "Mais ferramentas" — só aparece em mobile */}
+        {isMobile && (
+          <button
+            onClick={() => setMobileToolsOpen(v => !v)}
+            className={cn(
+              'w-7 h-7 flex items-center justify-center rounded border transition-colors',
+              mobileToolsOpen ? 'bg-blue-600 border-blue-500 text-white' : 'bg-[#1d2130] border-[#2a2e3b] text-[#8b8f9a]'
+            )}
+            aria-label={mobileToolsOpen ? 'Esconder ferramentas' : 'Mostrar ferramentas'}
+          >
+            {mobileToolsOpen ? <X size={12} /> : <MoreHorizontal size={12} />}
+          </button>
+        )}
+
+        {/* Pencil / Drawings — oculto em mobile colapsado */}
+        {(!isMobile || mobileToolsOpen) && (
         <button
           onClick={() => setDrawingsOpen(v => !v)}
           className={cn(
@@ -1802,6 +1821,7 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
         >
           <Pencil size={12} />
         </button>
+        )}
 
         {/* Timeframe selector */}
         <div className="relative">
@@ -1831,7 +1851,8 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
           )}
         </div>
 
-        {/* Chart type selector */}
+        {/* Chart type selector — oculto em mobile colapsado */}
+        {(!isMobile || mobileToolsOpen) && (
         <div className="relative">
           <button
             onClick={(e) => { e.stopPropagation(); setChartTypeOpen(v => !v); setTfOpen(false) }}
@@ -1863,8 +1884,10 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
             </div>
           )}
         </div>
+        )}
 
-        {/* Indicators toggle */}
+        {/* Indicators toggle — oculto em mobile colapsado */}
+        {(!isMobile || mobileToolsOpen) && (
         <button
           onClick={() => { setIndicadoresOpen(v => !v); setDrawingsOpen(false) }}
           className={cn(
@@ -1874,14 +1897,17 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
         >
           <Activity size={12} />
         </button>
+        )}
 
-        {/* Crosshair */}
+        {/* Crosshair — oculto em mobile colapsado */}
+        {(!isMobile || mobileToolsOpen) && (
         <button className="w-7 h-7 flex items-center justify-center rounded bg-[#1d2130] border border-[#2a2e3b] text-[#8b8f9a] hover:text-white transition-colors">
           <Crosshair size={12} />
         </button>
+        )}
 
-        {/* OHLC tooltip */}
-        {ohlc && (
+        {/* OHLC tooltip — só em desktop ou mobile expandido */}
+        {!isMobile && ohlc && (
           <div className="flex flex-col gap-0.5 mt-0.5 text-[11px] text-[#8b8f9a] leading-relaxed">
             {candleTime && <span className="font-mono text-white/50 text-[10px]">{candleTime}</span>}
             <span>Abertura: <span className="text-white font-semibold">{fmt(ohlc.open)}</span></span>

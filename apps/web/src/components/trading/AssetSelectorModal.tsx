@@ -13,13 +13,15 @@ interface AssetSelectorModalProps {
   selectedAsset: Asset
   onSelect: (asset: Asset) => void
   onClose: () => void
+  /** Layout mobile fullscreen (overlay fixo cobrindo toda a viewport) */
+  mobile?: boolean
 }
 
 type Category = 'Moedas' | 'Cripto' | 'Matérias-Primas' | 'Ações'
 
 const CATEGORIES: Category[] = ['Moedas', 'Cripto', 'Matérias-Primas', 'Ações']
 
-export function AssetSelectorModal({ selectedAsset, onSelect, onClose }: AssetSelectorModalProps) {
+export function AssetSelectorModal({ selectedAsset, onSelect, onClose, mobile = false }: AssetSelectorModalProps) {
   const [activeCategory, setActiveCategory] = useState<Category>('Moedas')
   const [search, setSearch] = useState('')
   const [showFavOnly, setShowFavOnly] = useState(false)
@@ -57,8 +59,13 @@ export function AssetSelectorModal({ selectedAsset, onSelect, onClose }: AssetSe
   }
 
   return (
-    <div className="absolute top-0 left-0 z-40 flex flex-col bg-[#151822] border-r border-[#2a2e3b] shadow-2xl"
-      style={{ width: 640, height: '100%' }}
+    <div className={cn(
+      'flex flex-col bg-[#151822] shadow-2xl',
+      mobile
+        ? 'fixed inset-0 z-50' // fullscreen no celular
+        : 'absolute top-0 left-0 z-40 border-r border-[#2a2e3b]'
+    )}
+      style={mobile ? undefined : { width: 640, height: '100%' }}
     >
       {/* Active asset tab + close */}
       <div className="flex items-center gap-2 px-3 pt-3 pb-2">

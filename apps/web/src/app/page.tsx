@@ -130,13 +130,23 @@ export default function TradingPage() {
     if (sidebarTab === 'CONTA')    return <ContaPage key={contaInitialTab} initialTab={contaInitialTab} />
     if (sidebarTab === 'TORNEIOS') return <TorneiosPage />
     if (sidebarTab === 'MERCADO')  return <MercadoPage />
-    if (sidebarTab === 'MAIS')     return (
-      <div className="flex flex-1 min-h-0 overflow-hidden">
-        {!isMobile && <MaisPanel onClose={() => setSidebarTab('TRADE')} onSelectAsset={(asset) => { handleSelectAsset(asset); setSidebarTab('TRADE') }} />}
-        <TradingChart asset={selectedAsset} onInfoClick={() => setAssetInfoOpen(true)} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades.filter(t => t.assetId === selectedAsset.id)} onPriceUpdate={handlePriceUpdate} />
-        {!isMobile && <TradingPanel asset={selectedAsset} oneClickTrade={tradeSettings.oneClickTrade} shortLabels={tradeSettings.shortLabels} accountId={currentAccount?.id} onTradeOpened={handleTradeOpened} onTradeExpired={handleTradeExpired} livePrice={livePrice} livePriceRef={livePriceRef} />}
-      </div>
-    )
+    if (sidebarTab === 'MAIS') {
+      // Em mobile o MaisPanel ocupa a tela toda — não tem sidebar pra acomodar
+      if (isMobile) return (
+        <MaisPanel
+          mobile
+          onClose={() => setSidebarTab('TRADE')}
+          onSelectAsset={(asset) => { handleSelectAsset(asset); setSidebarTab('TRADE') }}
+        />
+      )
+      return (
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+          <MaisPanel onClose={() => setSidebarTab('TRADE')} onSelectAsset={(asset) => { handleSelectAsset(asset); setSidebarTab('TRADE') }} />
+          <TradingChart asset={selectedAsset} onInfoClick={() => setAssetInfoOpen(true)} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades.filter(t => t.assetId === selectedAsset.id)} onPriceUpdate={handlePriceUpdate} />
+          <TradingPanel asset={selectedAsset} oneClickTrade={tradeSettings.oneClickTrade} shortLabels={tradeSettings.shortLabels} accountId={currentAccount?.id} onTradeOpened={handleTradeOpened} onTradeExpired={handleTradeExpired} livePrice={livePrice} livePriceRef={livePriceRef} />
+        </div>
+      )
+    }
     // TRADE (default)
     return (
       <div className="flex flex-1 min-h-0 overflow-hidden">
@@ -281,6 +291,7 @@ export default function TradingPage() {
             onTradeExpired={handleTradeExpired}
             livePrice={livePrice}
             livePriceRef={livePriceRef}
+            onAssetTap={() => setAssetSelectorOpen(true)}
           />
         )}
 
@@ -293,6 +304,15 @@ export default function TradingPage() {
       {/* ── Global modals (shared desktop + mobile) ──────────────────────── */}
       {assetInfoOpen && (
         <AssetInfoModal asset={selectedAsset} onClose={() => setAssetInfoOpen(false)} onTrade={() => setAssetInfoOpen(false)} />
+      )}
+      {/* Seletor de ativo em mobile: overlay fullscreen */}
+      {isMobile && assetSelectorOpen && (
+        <AssetSelectorModal
+          mobile
+          selectedAsset={selectedAsset}
+          onSelect={(asset) => { handleSelectAsset(asset); setAssetSelectorOpen(false) }}
+          onClose={() => setAssetSelectorOpen(false)}
+        />
       )}
       {depositoOpen && (
         <DepositoModal onClose={() => setDepositoOpen(false)} />

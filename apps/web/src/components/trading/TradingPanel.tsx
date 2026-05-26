@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react'
+import { createPortal } from 'react-dom'
 import { Minus, Plus, ArrowUp, ArrowDown, RefreshCw, ChevronDown, ChevronUp, ArrowLeftRight, Package, X } from 'lucide-react'
 import { ASSETS, getOTCPrice, type Asset, type OpenTrade, type ActiveTrade } from '@/lib/mockData'
 import { cn } from '@/lib/utils'
@@ -213,6 +214,13 @@ export const TradingPanel = forwardRef<TradingPanelHandle, TradingPanelProps>(fu
   const [placing, setPlacing] = useState(false)
   const [tradeError, setTradeError] = useState('')
   const [tradeResult, setTradeResult] = useState<{ direction: 'CALL' | 'PUT'; amount: number; profit: number; won: boolean } | null>(null)
+
+  // Auto-dismiss do popup após 4s — comum em apps de trading, evita acúmulo de cliques
+  useEffect(() => {
+    if (!tradeResult) return
+    const t = setTimeout(() => setTradeResult(null), 4000)
+    return () => clearTimeout(t)
+  }, [tradeResult])
 
   const refreshAccounts = useAuthStore(s => s.refreshAccounts)
 
@@ -592,8 +600,9 @@ export const TradingPanel = forwardRef<TradingPanelHandle, TradingPanelProps>(fu
       hidden && 'hidden'
     )}>
 
-      {/* Trade result popup */}
-      {tradeResult && (
+      {/* Trade result popup — portal pro <body> pra escapar do display:none quando
+          o painel está oculto (sheet colapsado em mobile, modo paisagem, etc.) */}
+      {tradeResult && typeof document !== 'undefined' && createPortal(
         <div className="fixed inset-0 z-[100] flex items-center justify-center pointer-events-none">
           <div className={cn(
             'pointer-events-auto px-8 py-6 rounded-2xl shadow-2xl border relative min-w-[260px] text-center backdrop-blur-sm',
@@ -620,7 +629,8 @@ export const TradingPanel = forwardRef<TradingPanelHandle, TradingPanelProps>(fu
               {tradeResult.direction === 'CALL' ? 'Para cima' : 'Para baixo'} · R$ {fmtMoney(tradeResult.amount)}
             </p>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Asset header */}
