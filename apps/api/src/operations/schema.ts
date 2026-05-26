@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 export const createOperationSchema = z.object({
-  accountId:        z.string().cuid(),
+  accountId:        z.string().uuid(),
   assetId:          z.string().min(1),
   assetSymbol:      z.string().min(1),
   direction:        z.enum(['CALL', 'PUT']),

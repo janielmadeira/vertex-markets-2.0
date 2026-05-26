@@ -20,12 +20,12 @@ export async function buildApp() {
     'http://localhost:3001',
     ...(process.env.FRONTEND_URL ?? '').split(',').map(o => o.trim()).filter(Boolean),
   ]
-  // Aceita qualquer subdomínio .easypanel.host (proxy reverso pode bater em vários hostnames)
   function isOriginAllowed(origin: string): boolean {
     if (allowedOrigins.some(o => origin.startsWith(o))) return true
     try {
       const host = new URL(origin).hostname
       if (host.endsWith('.easypanel.host')) return true
+      if (host.endsWith('.vercel.app'))     return true
     } catch { /* origin malformado */ }
     return false
   }
@@ -41,8 +41,13 @@ export async function buildApp() {
   await app.register(cookie)
   await app.register(websocket)
 
+  // JWT: agora valida tokens emitidos pelo Supabase Auth.
+  // SUPABASE_JWT_SECRET vem do painel Supabase > Settings > API > JWT Secret.
+  const jwtSecret = process.env.SUPABASE_JWT_SECRET ?? process.env.JWT_SECRET
+  if (!jwtSecret) throw new Error('SUPABASE_JWT_SECRET (ou JWT_SECRET) precisa estar no .env')
   await app.register(jwt, {
-    secret: process.env.JWT_SECRET ?? 'dev-secret-change-me',
+    secret: jwtSecret,
+    verify: { algorithms: ['HS256'] },
   })
 
   // ── Auth decorator ─────────────────────────────────────────────────────────
@@ -55,13 +60,13 @@ export async function buildApp() {
   })
 
   // ── Admin guard ───────────────────────────────────────────────────────────
+  // Admin agora vive na tabela public.admin_users (FK p/ auth.users.id).
+  // Existencia da linha = admin. Coluna 'role' distingue admin vs super_admin.
   app.decorate('requireAdmin', async (req: any, reply: any) => {
     const sub = req.user?.sub as string | undefined
     if (!sub) return reply.status(401).send({ error: 'UNAUTHORIZED' })
-    const user = await prisma.user.findUnique({ where: { id: sub }, select: { role: true } })
-    if (!user || user.role !== 'ADMIN') {
-      return reply.status(403).send({ error: 'FORBIDDEN' })
-    }
+    const admin = await prisma.adminUser.findUnique({ where: { userId: sub } })
+    if (!admin) return reply.status(403).send({ error: 'FORBIDDEN' })
   })
 
   // ── Health check ──────────────────────────────────────────────────────────

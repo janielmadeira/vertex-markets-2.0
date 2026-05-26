@@ -1,21 +1,17 @@
 import { createHash } from 'node:crypto'
 import { prisma } from '../prisma.js'
 import { redis, KEYS } from '../redis.js'
+import { PriceSource } from '@prisma/client'
 import type { CreateOperationInput } from './schema.js'
 
 // Tolerancia maxima entre entryPrice enviado pelo cliente e preco atual do servidor.
-// 0.2% cobre latencia de WS->HTTP (~200-500ms) sem permitir manipulacao significativa.
 const ENTRY_PRICE_TOLERANCE = 0.002
 
-// Lista de simbolos OTC server-authoritative. Tem que bater com seed-otc.ts.
-// Mantida aqui em vez de queryar OtcAsset pra evitar 1 round-trip a cada operacao.
 const SERVER_AUTH_SYMBOLS = new Set([
   'USDBRL-OTC', 'USDCHF-OTC', 'EURAUD-OTC', 'AAPL-OTC', 'TSLA-OTC',
 ])
 
 function isServerAuthoritative(assetSymbol: string): boolean {
-  // Symbol no front vem como "USD/BRL"; precisamos mapear para "USDBRL-OTC".
-  // Tentativa direta primeiro (caso ja venha no formato canonico).
   if (SERVER_AUTH_SYMBOLS.has(assetSymbol)) return true
   const canonical = assetSymbol.replace(/[\/\-\s]/g, '').toUpperCase() + '-OTC'
   return SERVER_AUTH_SYMBOLS.has(canonical)
@@ -42,7 +38,6 @@ function computeAuditHash(parts: {
   amount:      number
   payout:      number
 }): string {
-  // Canonical string -> ordem fixa, separador unico. Reproduzivel por terceiros.
   const payload = [
     parts.operationId,
     parts.entryPrice.toFixed(8),
@@ -63,22 +58,16 @@ export async function createOperation(userId: string, input: CreateOperationInpu
   const balance = Number(account.balance)
   if (balance < input.amount) throw new Error('INSUFFICIENT_BALANCE')
 
-  // Decide entryPrice + source: server-auth assets validam contra Redis.
   let entryPrice       = input.entryPrice
-  let entryPriceSource: 'SERVER' | 'CLIENT' = 'CLIENT'
+  let entryPriceSource: PriceSource = PriceSource.CLIENT
 
   if (isServerAuthoritative(input.assetSymbol)) {
     const serverPrice = await readServerPrice(input.assetSymbol)
-    if (serverPrice == null) {
-      // Engine pode estar reiniciando; rejeita pra nao operar sem fonte confiavel.
-      throw new Error('PRICE_UNAVAILABLE')
-    }
+    if (serverPrice == null) throw new Error('PRICE_UNAVAILABLE')
     const drift = Math.abs(input.entryPrice - serverPrice) / serverPrice
-    if (drift > ENTRY_PRICE_TOLERANCE) {
-      throw new Error('PRICE_DIVERGED')
-    }
-    entryPrice       = serverPrice    // sempre persiste o preco do servidor
-    entryPriceSource = 'SERVER'
+    if (drift > ENTRY_PRICE_TOLERANCE) throw new Error('PRICE_DIVERGED')
+    entryPrice       = serverPrice
+    entryPriceSource = PriceSource.SERVER
   }
 
   const expiresAt = new Date(Date.now() + input.expiresInSeconds * 1000)
@@ -91,7 +80,7 @@ export async function createOperation(userId: string, input: CreateOperationInpu
         assetSymbol: input.assetSymbol,
         direction:   input.direction,
         amount:      input.amount,
-        payout:      input.payout,
+        payoutPct:   input.payout,
         entryPrice,
         entryPriceSource,
         expiresAt,
@@ -99,14 +88,14 @@ export async function createOperation(userId: string, input: CreateOperationInpu
     }),
     prisma.account.update({
       where: { id: input.accountId },
-      data: { balance: { decrement: input.amount } },
+      data:  { balance: { decrement: input.amount } },
     }),
     prisma.transaction.create({
       data: {
         accountId:   input.accountId,
         type:        'TRADE_LOSS',
         amount:      -input.amount,
-        description: `Operação aberta: ${input.assetSymbol} ${input.direction}`,
+        description: `Operacao aberta: ${input.assetSymbol} ${input.direction}`,
       },
     }),
   ])
@@ -134,26 +123,23 @@ function scheduleExpiry(
       const op = await prisma.operation.findUnique({ where: { id: operationId } })
       if (!op || op.status !== 'OPEN') return
 
-      // Decide exitPrice + source. Server-auth le do Redis no instante da expiracao.
       let exitPrice: number
-      let exitPriceSource: 'SERVER' | 'FALLBACK'
+      let exitPriceSource: PriceSource
 
       if (isServerAuthoritative(assetSymbol)) {
         const serverPrice = await readServerPrice(assetSymbol)
         if (serverPrice == null) {
-          // Engine reiniciou no meio? Fallback marcado, audit trail mostra isso.
           const change = (Math.random() * 0.01) - 0.005
           exitPrice       = parseFloat((entryPrice * (1 + change)).toFixed(5))
-          exitPriceSource = 'FALLBACK'
+          exitPriceSource = PriceSource.FALLBACK
         } else {
           exitPrice       = serverPrice
-          exitPriceSource = 'SERVER'
+          exitPriceSource = PriceSource.SERVER
         }
       } else {
-        // Asset sem fonte server-side: ainda usa random (legacy), mas marcado.
         const change = (Math.random() * 0.01) - 0.005
         exitPrice       = parseFloat((entryPrice * (1 + change)).toFixed(5))
-        exitPriceSource = 'FALLBACK'
+        exitPriceSource = PriceSource.FALLBACK
       }
 
       const won =
@@ -165,7 +151,7 @@ function scheduleExpiry(
 
       const auditHash = computeAuditHash({
         operationId, entryPrice, exitPrice, direction, amount, payout,
-        openedAt: op.openedAt, closedAt,
+        openedAt: op.createdAt, closedAt,
       })
 
       await prisma.$transaction([
@@ -184,14 +170,15 @@ function scheduleExpiry(
           ? [
               prisma.account.update({
                 where: { id: accountId },
-                data: { balance: { increment: amount + profit } },
+                data:  { balance: { increment: amount + profit } },
               }),
               prisma.transaction.create({
                 data: {
                   accountId,
                   type:        'TRADE_WIN',
                   amount:      amount + profit,
-                  description: `Operação encerrada: ganho de R$${profit.toFixed(2)}`,
+                  description: `Operacao encerrada: ganho de R$${profit.toFixed(2)}`,
+                  operationId,
                 },
               }),
             ]
@@ -205,7 +192,7 @@ function scheduleExpiry(
 
 export async function listOperations(userId: string, accountId?: string) {
   const accounts = await prisma.account.findMany({
-    where: { userId },
+    where:  { userId },
     select: { id: true },
   })
   const accountIds = accounts.map(a => a.id)
@@ -213,15 +200,15 @@ export async function listOperations(userId: string, accountId?: string) {
   if (accountId && !accountIds.includes(accountId)) throw new Error('ACCOUNT_NOT_FOUND')
 
   return prisma.operation.findMany({
-    where: { accountId: accountId ? accountId : { in: accountIds } },
-    orderBy: { openedAt: 'desc' },
-    take: 50,
+    where:   { accountId: accountId ? accountId : { in: accountIds } },
+    orderBy: { createdAt: 'desc' },
+    take:    50,
   })
 }
 
 export async function getOperation(userId: string, operationId: string) {
   const op = await prisma.operation.findUnique({
-    where: { id: operationId },
+    where:   { id: operationId },
     include: { account: { select: { userId: true } } },
   })
   if (!op || op.account.userId !== userId) throw new Error('NOT_FOUND')

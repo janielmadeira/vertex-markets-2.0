@@ -1,3 +1,10 @@
+// Schema apontando para o Postgres do Supabase.
+// Convencoes: uuid em IDs, snake_case via @map, sem campo email/password (gerenciado pelo Supabase Auth).
+//
+// Tabelas modeladas: apenas as que o Fastify le/escreve.
+// As demais (deposits, withdrawals, kyc_submissions, support_*, admin_audit_log)
+// ficam acessiveis via RPCs Supabase no painel admin -> nao precisam de model aqui.
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -8,134 +15,139 @@ datasource db {
 }
 
 // ─── Enums ────────────────────────────────────────────────────────────────────
-
-enum AccountType {
-  DEMO
-  REAL
-}
-
-enum Direction {
-  CALL
-  PUT
-}
-
-enum OperationStatus {
-  OPEN
-  WON
-  LOST
-  CANCELLED
-}
-
-enum TransactionType {
-  DEMO_CREDIT
-  DEPOSIT
-  WITHDRAWAL
-  TRADE_WIN
-  TRADE_LOSS
-  BONUS
-}
-
-enum KycStatus {
-  PENDING
-  SUBMITTED
-  APPROVED
-  REJECTED
-}
-
-enum UserRole {
-  USER
-  ADMIN
-}
+// Supabase usa colunas text para a maioria dos enums conceituais
+// (operations.direction, operations.status, accounts.type, transactions.type).
+// Mantemos esses como String no Prisma e validamos no app via Zod.
+//
+// Os UNICOS enums reais (CREATE TYPE) no Supabase sao:
+//   - otc_asset_status (ACTIVE, INACTIVE)
+//   - price_source     (SERVER, CLIENT, FALLBACK)
 
 enum OtcAssetStatus {
   ACTIVE
   INACTIVE
+
+  @@map("otc_asset_status")
 }
 
 enum PriceSource {
-  SERVER     // preco lido do Redis (engine OTC autoritativo)
-  CLIENT     // preco enviado pelo cliente (asset sem fonte server-side)
-  FALLBACK   // exit price calculado por Math.random (asset sem fonte server-side)
+  SERVER
+  CLIENT
+  FALLBACK
+
+  @@map("price_source")
 }
 
 // ─── Models ───────────────────────────────────────────────────────────────────
 
-model User {
-  id        String    @id @default(cuid())
-  email     String    @unique
-  password  String
-  name      String
-  phone     String?
-  country   String?
-  kycStatus KycStatus @default(PENDING)
-  role      UserRole  @default(USER)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+// Profile equivale ao 'user' do dominio. ID == auth.users(id).
+// Nao tem email/password aqui -> esses vivem em auth.users (Supabase Auth).
+model Profile {
+  id                   String    @id @db.Uuid
+  name                 String
+  kycStatus            String    @default("pending") @map("kyc_status")
+  createdAt            DateTime  @default(now())       @map("created_at") @db.Timestamptz(6)
+  bonusBalance         Decimal   @default(0)           @map("bonus_balance")        @db.Decimal
+  rolloverRequired     Decimal   @default(0)           @map("rollover_required")    @db.Decimal
+  rolloverCompleted    Decimal   @default(0)           @map("rollover_completed")   @db.Decimal
+  blockedAt            DateTime? @map("blocked_at")    @db.Timestamptz(6)
+  blockedReason        String?   @map("blocked_reason")
+  cpf                  String?
+  phone                String?
+  customPayoutForex    Decimal?  @map("custom_payout_forex")  @db.Decimal
+  customPayoutOtc      Decimal?  @map("custom_payout_otc")    @db.Decimal
+  customPayoutCrypto   Decimal?  @map("custom_payout_crypto") @db.Decimal
 
   accounts Account[]
 
-  @@map("users")
+  @@map("profiles")
+}
+
+model AdminUser {
+  userId    String   @id                @map("user_id")    @db.Uuid
+  role      String   @default("admin")
+  createdAt DateTime @default(now())    @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  @@map("admin_users")
 }
 
 model Account {
-  id        String      @id @default(cuid())
-  userId    String
-  type      AccountType
-  balance   Decimal     @default(0) @db.Decimal(18, 2)
-  currency  String      @default("BRL")
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  type      String   // 'DEMO' | 'REAL' (Supabase guarda como text, nao enum)
+  balance   Decimal  @default(0) @db.Decimal
+  currency  String   @default("BRL")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profile      Profile       @relation(fields: [userId], references: [id], onDelete: Cascade)
   operations   Operation[]
   transactions Transaction[]
 
-  @@unique([userId, type])
+  @@unique([userId, type], map: "accounts_user_id_type_key")
   @@map("accounts")
 }
 
 model Operation {
-  id          String          @id @default(cuid())
-  accountId   String
-  assetId     String
-  assetSymbol String
-  direction   Direction
-  amount      Decimal         @db.Decimal(18, 2)
-  payout      Int
-  entryPrice  Decimal         @db.Decimal(18, 5)
-  exitPrice   Decimal?        @db.Decimal(18, 5)
-  profit      Decimal?        @db.Decimal(18, 2)
-  status      OperationStatus @default(OPEN)
-  expiresAt   DateTime
-  openedAt    DateTime        @default(now())
-  closedAt    DateTime?
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accountId   String    @map("account_id")   @db.Uuid
+  assetId     String    @map("asset_id")
+  assetSymbol String    @map("asset_symbol")
+  direction   String    // 'CALL' | 'PUT'
+  amount      Decimal   @db.Decimal
+  payoutPct   Decimal   @map("payout_pct")   @db.Decimal
+  entryPrice  Decimal   @map("entry_price")  @db.Decimal
+  exitPrice   Decimal?  @map("exit_price")   @db.Decimal
+  profit      Decimal?  @db.Decimal
+  status      String    @default("OPEN")
+  expiresAt   DateTime  @map("expires_at")   @db.Timestamptz(6)
+  closedAt    DateTime? @map("closed_at")    @db.Timestamptz(6)
+  createdAt   DateTime  @default(now())      @map("created_at") @db.Timestamptz(6)
 
-  // Audit trail (Fase 5): rastreia origem dos precos e gera hash reproduzivel.
-  entryPriceSource PriceSource @default(CLIENT)
-  exitPriceSource  PriceSource?
-  auditHash        String?     @db.VarChar(64)  // SHA256 hex
+  // Audit trail (Fase 5)
+  entryPriceSource PriceSource  @default(CLIENT) @map("entry_price_source")
+  exitPriceSource  PriceSource? @map("exit_price_source")
+  auditHash        String?      @map("audit_hash") @db.VarChar(64)
+
+  // Trilha admin
+  modifiedByAdmin String?   @map("modified_by_admin") @db.Uuid
+  modifiedAt      DateTime? @map("modified_at") @db.Timestamptz(6)
+  adminNotes      String?   @map("admin_notes")
 
   account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
-  @@index([accountId, status])
-  @@index([expiresAt, status])
   @@map("operations")
 }
 
+model Transaction {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accountId   String   @map("account_id") @db.Uuid
+  type        String   // texto livre, mapeado dos enums TransactionType pelo app
+  amount      Decimal  @db.Decimal
+  description String?
+  operationId String?  @map("operation_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@map("transactions")
+}
+
 model OtcAsset {
-  id              String         @id @default(cuid())
+  id              String         @id @default(cuid())  // cuid gerado no app, persiste como text na DB (compat com operations.asset_id text)
   symbol          String         @unique
   name            String
-  basePrice       Decimal        @db.Decimal(18, 5)
-  volatility      Decimal        @default(0.0010) @db.Decimal(8, 6)
-  trend           Decimal        @default(0) @db.Decimal(8, 6)
+  basePrice       Decimal        @map("base_price") @db.Decimal(18, 5)
+  volatility      Decimal        @default(0.001) @db.Decimal(8, 6)
+  trend           Decimal        @default(0)     @db.Decimal(8, 6)
   payout          Int            @default(85)
   decimals        Int            @default(5)
   status          OtcAssetStatus @default(ACTIVE)
-  sessionStartUtc String?
-  sessionEndUtc   String?
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  sessionStartUtc String?        @map("session_start_utc")
+  sessionEndUtc   String?        @map("session_end_utc")
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime       @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   candles OtcCandle[]
 
@@ -144,9 +156,9 @@ model OtcAsset {
 
 model OtcCandle {
   id        BigInt   @id @default(autoincrement())
-  assetId   String
+  assetId   String   @map("asset_id")
   timeframe Int
-  openTime  DateTime
+  openTime  DateTime @map("open_time") @db.Timestamptz(6)
   open      Decimal  @db.Decimal(18, 5)
   high      Decimal  @db.Decimal(18, 5)
   low       Decimal  @db.Decimal(18, 5)
@@ -157,18 +169,4 @@ model OtcCandle {
   @@unique([assetId, timeframe, openTime])
   @@index([assetId, timeframe, openTime(sort: Desc)])
   @@map("otc_candles")
-}
-
-model Transaction {
-  id          String          @id @default(cuid())
-  accountId   String
-  type        TransactionType
-  amount      Decimal         @db.Decimal(18, 2)
-  description String?
-  createdAt   DateTime        @default(now())
-
-  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
-
-  @@index([accountId])
-  @@map("transactions")
 }
