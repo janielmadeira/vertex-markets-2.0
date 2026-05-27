@@ -304,7 +304,7 @@ export const TradingPanel = forwardRef<TradingPanelHandle, TradingPanelProps>(fu
       .from('operations')
       .select('id, asset_id, direction, amount, payout_pct, entry_price, expires_at, created_at')
       .eq('account_id', accountId)
-      .eq('status', 'open')
+      .eq('status', 'OPEN')
       .order('created_at', { ascending: false })
 
     if (error || !data || data.length === 0) return
