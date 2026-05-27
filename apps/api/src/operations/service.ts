@@ -124,96 +124,135 @@ export async function createOperation(userId: string, input: CreateOperationInpu
     }),
   ])
 
-  scheduleExpiry(
-    operation.id, input.accountId, input.amount, input.payout,
-    entryPrice, input.direction, input.assetSymbol, input.expiresInSeconds,
-  )
+  scheduleExpiry(operation.id, input.expiresInSeconds)
 
   return operation
 }
 
-function scheduleExpiry(
-  operationId: string,
-  accountId: string,
-  amount: number,
-  payout: number,
-  entryPrice: number,
-  direction: string,
-  assetSymbol: string,
-  expiresInSeconds: number,
-) {
-  setTimeout(async () => {
-    try {
-      await ensureFreshSymbols()
+// Liquida uma operacao OPEN: calcula exitPrice, atualiza status, credita conta se ganhou.
+// Idempotente: se nao for OPEN (ja liquidada ou inexistente), retorna sem fazer nada.
+// Eh chamada tanto pelo setTimeout (caminho feliz) quanto pelo sweeper (caminho de
+// recuperacao apos restart do container, que perde os setTimeout em memoria).
+export async function settleOperation(operationId: string): Promise<void> {
+  await ensureFreshSymbols()
 
-      const op = await prisma.operation.findUnique({ where: { id: operationId } })
-      if (!op || op.status !== 'OPEN') return
+  const op = await prisma.operation.findUnique({ where: { id: operationId } })
+  if (!op || op.status !== 'OPEN') return
 
-      let exitPrice: number
-      let exitPriceSource: PriceSource
+  const entryPrice  = Number(op.entryPrice)
+  const amount      = Number(op.amount)
+  const payout      = Number(op.payoutPct)  // Prisma pode retornar Decimal
+  const direction   = op.direction
+  const assetSymbol = op.assetSymbol
 
-      if (isServerAuthoritative(assetSymbol)) {
-        const serverPrice = await readServerPrice(assetSymbol)
-        if (serverPrice == null) {
-          const change = (Math.random() * 0.01) - 0.005
-          exitPrice       = parseFloat((entryPrice * (1 + change)).toFixed(5))
-          exitPriceSource = PriceSource.FALLBACK
-        } else {
-          exitPrice       = serverPrice
-          exitPriceSource = PriceSource.SERVER
-        }
-      } else {
-        const change = (Math.random() * 0.01) - 0.005
-        exitPrice       = parseFloat((entryPrice * (1 + change)).toFixed(5))
-        exitPriceSource = PriceSource.FALLBACK
-      }
+  let exitPrice: number
+  let exitPriceSource: PriceSource
 
-      const won =
-        (direction === 'CALL' && exitPrice > entryPrice) ||
-        (direction === 'PUT'  && exitPrice < entryPrice)
-
-      const profit = won ? parseFloat((amount * (payout / 100)).toFixed(2)) : 0
-      const closedAt = new Date()
-
-      const auditHash = computeAuditHash({
-        operationId, entryPrice, exitPrice, direction, amount, payout,
-        openedAt: op.createdAt, closedAt,
-      })
-
-      await prisma.$transaction([
-        prisma.operation.update({
-          where: { id: operationId },
-          data: {
-            status:    won ? 'WON' : 'LOST',
-            exitPrice,
-            exitPriceSource,
-            auditHash,
-            profit,
-            closedAt,
-          },
-        }),
-        ...(won
-          ? [
-              prisma.account.update({
-                where: { id: accountId },
-                data:  { balance: { increment: amount + profit } },
-              }),
-              prisma.transaction.create({
-                data: {
-                  accountId,
-                  type:        'TRADE_WIN',
-                  amount:      amount + profit,
-                  description: `Operacao encerrada: ganho de R$${profit.toFixed(2)}`,
-                  operationId,
-                },
-              }),
-            ]
-          : []),
-      ])
-    } catch (err) {
-      console.error('[expiry] erro ao resolver operacao:', operationId, err)
+  if (isServerAuthoritative(assetSymbol)) {
+    const serverPrice = await readServerPrice(assetSymbol)
+    if (serverPrice == null) {
+      const change = (Math.random() * 0.01) - 0.005
+      exitPrice       = parseFloat((entryPrice * (1 + change)).toFixed(5))
+      exitPriceSource = PriceSource.FALLBACK
+    } else {
+      exitPrice       = serverPrice
+      exitPriceSource = PriceSource.SERVER
     }
+  } else {
+    const change = (Math.random() * 0.01) - 0.005
+    exitPrice       = parseFloat((entryPrice * (1 + change)).toFixed(5))
+    exitPriceSource = PriceSource.FALLBACK
+  }
+
+  const won =
+    (direction === 'CALL' && exitPrice > entryPrice) ||
+    (direction === 'PUT'  && exitPrice < entryPrice)
+
+  const profit   = won ? parseFloat((amount * (payout / 100)).toFixed(2)) : 0
+  const closedAt = new Date()
+
+  const auditHash = computeAuditHash({
+    operationId, entryPrice, exitPrice, direction, amount, payout,
+    openedAt: op.createdAt, closedAt,
+  })
+
+  await prisma.$transaction([
+    prisma.operation.update({
+      where: { id: operationId },
+      data: {
+        status:    won ? 'WON' : 'LOST',
+        exitPrice,
+        exitPriceSource,
+        auditHash,
+        profit,
+        closedAt,
+      },
+    }),
+    ...(won
+      ? [
+          prisma.account.update({
+            where: { id: op.accountId },
+            data:  { balance: { increment: amount + profit } },
+          }),
+          prisma.transaction.create({
+            data: {
+              accountId:   op.accountId,
+              type:        'TRADE_WIN',
+              amount:      amount + profit,
+              description: `Operacao encerrada: ganho de R$${profit.toFixed(2)}`,
+              operationId,
+            },
+          }),
+        ]
+      : []),
+  ])
+}
+
+function scheduleExpiry(operationId: string, expiresInSeconds: number) {
+  setTimeout(() => {
+    settleOperation(operationId).catch(err =>
+      console.error('[expiry] erro ao resolver operacao:', operationId, err)
+    )
   }, expiresInSeconds * 1000)
+}
+
+// Sweeper: roda periodicamente buscando operacoes OPEN cuja expires_at ja passou.
+// Garante que operacoes nao ficam orfas se o container reiniciar (perdendo
+// os setTimeout em memoria). Tambem cobre janela em que o setTimeout falha
+// silenciosamente por qualquer motivo. Idempotente — settleOperation eh no-op
+// se a operacao ja nao estiver OPEN.
+let sweeperTimer: NodeJS.Timeout | null = null
+
+export function startOrphanSweeper(intervalMs = 30_000): void {
+  if (sweeperTimer) return
+  console.log(`[operations] orphan sweeper started (every ${intervalMs}ms)`)
+
+  const tick = async () => {
+    try {
+      const orphans = await prisma.operation.findMany({
+        where:  { status: 'OPEN', expiresAt: { lte: new Date() } },
+        select: { id: true },
+        take:   100,  // limite de seguranca por iteracao
+      })
+      if (orphans.length === 0) return
+      console.log(`[operations] settling ${orphans.length} orphan operation(s)`)
+      for (const op of orphans) {
+        await settleOperation(op.id).catch(err =>
+          console.error('[operations] sweep settle failed:', op.id, err?.message ?? err)
+        )
+      }
+    } catch (err: any) {
+      console.error('[operations] sweep error:', err?.message ?? err)
+    }
+  }
+
+  sweeperTimer = setInterval(tick, intervalMs)
+  // Roda uma vez no startup pra limpar backlog acumulado.
+  tick()
+
+  const stop = () => { if (sweeperTimer) clearInterval(sweeperTimer); sweeperTimer = null }
+  process.once('SIGTERM', stop)
+  process.once('SIGINT',  stop)
 }
 
 export async function listOperations(userId: string, accountId?: string) {

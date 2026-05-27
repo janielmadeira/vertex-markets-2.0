@@ -93,6 +93,13 @@ export default function TradingPage() {
     authStore.refreshAccounts()
   }
 
+  // Bug A fix: ao trocar de conta (DEMO <-> REAL), reseta activeTrades pra evitar
+  // que trades da conta anterior fiquem visualmente "vazando" pra nova.
+  // O TradingPanel vai recarregar via loadOpenTrades automaticamente (depende de accountId).
+  useEffect(() => {
+    setActiveTrades([])
+  }, [currentAccount?.id])
+
   const isDemo      = authStore.isDemo
   const accounts    = authStore.user?.accounts ?? []
   const demoBalance = parseFloat(accounts.find(a => a.type === 'DEMO')?.balance ?? '0')

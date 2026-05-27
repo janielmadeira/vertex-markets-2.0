@@ -116,9 +116,12 @@ export default function OperacoesAdminPage() {
   }
 
   function statusBadge(r: Row) {
-    if (r.status === 'voided') return <Badge color="gray">Estornada</Badge>
-    if (r.status === 'open')   return <Badge color="yellow">Em aberto</Badge>
-    if ((r.profit ?? 0) > 0)   return <Badge color="green">Ganhou</Badge>
+    // DB usa enum maiusculo. Comparacao case-insensitive evita silent bug
+    // (codigo antigo comparava minusculo e nunca matchava OPEN/VOIDED).
+    const s = String(r.status ?? '').toUpperCase()
+    if (s === 'VOIDED') return <Badge color="gray">Estornada</Badge>
+    if (s === 'OPEN')   return <Badge color="yellow">Em aberto</Badge>
+    if ((r.profit ?? 0) > 0) return <Badge color="green">Ganhou</Badge>
     return <Badge color="red">Perdeu</Badge>
   }
 

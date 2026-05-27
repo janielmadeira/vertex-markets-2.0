@@ -26,10 +26,13 @@ interface Props {
 type NewStatus = 'won' | 'lost'
 
 export function EditOperationStatusModal({ operation, onClose, onSaved }: Props) {
+  // DB usa enum maiusculo (OPEN, WON, LOST, DRAW, VOIDED). Comparacao case-insensitive
+  // pra robustez (codigo antigo comparava minusculo e nunca dava match).
+  const statusUpper = String(operation.status ?? '').toUpperCase()
   const currentKind: 'open' | 'won' | 'lost' | 'voided' =
-    operation.status === 'voided' ? 'voided' :
-    operation.status === 'open'   ? 'open' :
-    (operation.profit ?? 0) > 0   ? 'won'  : 'lost'
+    statusUpper === 'VOIDED' ? 'voided' :
+    statusUpper === 'OPEN'   ? 'open' :
+    (operation.profit ?? 0) > 0 ? 'won' : 'lost'
 
   const [newStatus, setNewStatus] = useState<NewStatus>(currentKind === 'won' ? 'lost' : 'won')
   const [reason,    setReason]    = useState('')
