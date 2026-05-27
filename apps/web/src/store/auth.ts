@@ -32,10 +32,14 @@ interface AuthState {
 }
 
 async function fetchAccounts(userId: string): Promise<Account[]> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('accounts')
     .select('id, type, balance, currency')
     .eq('user_id', userId)
+  if (error) {
+    console.warn('[accounts] fetch error:', error.message)
+    return []
+  }
   return (data ?? []).map(a => ({ ...a, balance: String(a.balance) }))
 }
 
@@ -102,7 +106,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       else set({ user: null, token: null })
     })
 
-    // Real-time: atualiza saldo sempre que uma conta do usuário mudar
+    // Real-time: atualiza saldo sempre que uma conta do usuário mudar.
+    // Defensivo: nunca substitui accounts por array vazio (causaria flash de
+    // R$ 0,00 se o fetch falhar transitoriamente - auth refresh, race, RLS).
     supabase
       .channel('account-balance')
       .on('postgres_changes', {
@@ -112,6 +118,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         filter: `user_id=eq.${session.user.id}`,
       }, async () => {
         const updated = await fetchAccounts(session.user.id)
+        if (updated.length === 0) return  // mantem estado atual em caso de fetch vazio
         set(state => state.user ? { user: { ...state.user, accounts: updated } } : {})
       })
       .subscribe()
@@ -121,6 +128,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const user = get().user
     if (!user) return
     const accounts = await fetchAccounts(user.id)
+    // Mesma defesa do realtime: nao zera o saldo visivel se o fetch retornar vazio.
+    if (accounts.length === 0) return
     set({ user: { ...user, accounts } })
   },
 
