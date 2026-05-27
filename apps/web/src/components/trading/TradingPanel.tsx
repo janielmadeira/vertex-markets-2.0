@@ -361,20 +361,37 @@ export const TradingPanel = forwardRef<TradingPanelHandle, TradingPanelProps>(fu
         payout: op.payout_pct,
       })
 
-      // Reregistra o timer de liquidação com o tempo restante real
+      // Reregistra o timer de liquidação com o tempo restante real.
+      // Mesma estrategia do caminho fresh (placeTrade): popup imediato com
+      // calculo local + settle no banco em background pra confirmar.
       const tid = setTimeout(async () => {
         timeoutMap.current.delete(op.id)
         const exitPrice = livePriceRef.current ?? assetObj.price
-        const { data: result } = await supabase.rpc('settle_trade', {
-          p_operation_id: op.id,
-          p_exit_price:   exitPrice,
-        })
-        const won    = (result as any)?.status === 'WON'
-        const profit = won ? parseFloat((result as any)?.profit ?? '0') : 0
+        const dir = op.direction as 'CALL' | 'PUT'
+
+        // Popup imediato (sem esperar RPC do Supabase)
+        const localWon    = dir === 'CALL' ? exitPrice > op.entry_price : exitPrice < op.entry_price
+        const localProfit = localWon ? parseFloat((op.amount * (op.payout_pct / 100)).toFixed(2)) : 0
 
         setOpenTrades(prev => prev.filter(t => t.id !== op.id))
         onTradeExpired?.(op.id)
-        setTradeResult({ direction: op.direction as 'CALL' | 'PUT', amount: op.amount, profit, won })
+        setTradeResult({ direction: dir, amount: op.amount, profit: localProfit, won: localWon })
+
+        // Background: confirma com backend, corrige popup se divergir
+        try {
+          const { data: result } = await supabase.rpc('settle_trade', {
+            p_operation_id: op.id,
+            p_exit_price:   exitPrice,
+          })
+          const backendWon    = (result as any)?.status === 'WON'
+          const backendProfit = backendWon ? parseFloat((result as any)?.profit ?? '0') : 0
+          if (backendWon !== localWon || backendProfit !== localProfit) {
+            setTradeResult({ direction: dir, amount: op.amount, profit: backendProfit, won: backendWon })
+          }
+        } catch (err) {
+          console.warn('[trade] settle_trade falhou (recuperada), mantendo resultado local:', err)
+        }
+
         await refreshAccounts()
         loadHistory()
       }, remainingMs)
@@ -541,30 +558,44 @@ export const TradingPanel = forwardRef<TradingPanelHandle, TradingPanelProps>(fu
 
       setConfirmTrade(null)
 
-      // Liquidar operação ao expirar com o preço atual no momento da expiração
+      // Liquidar operação ao expirar com o preço atual no momento da expiração.
+      // UX: mostra popup IMEDIATO baseado no preço local (livePriceRef = mesmo
+      // que aparece no chart). Em paralelo, chama settle_trade no banco pra
+      // persistir resultado oficial. Se backend discordar (raro), o resultado
+      // oficial sobrescreve o popup (mas geralmente concordam porque o
+      // livePriceRef vem do mesmo engine OTC que o backend usa).
       const tidPlace = setTimeout(async () => {
         timeoutMap.current.delete(operationId)
         const exitPrice = livePriceRef.current ?? asset.price
-        let won = false
-        let profit = 0
 
-        if (!operationId.startsWith('local-')) {
-          const { data: result } = await supabase.rpc('settle_trade', {
-            p_operation_id: operationId,
-            p_exit_price:   exitPrice,
-          })
-          won    = (result as any)?.status === 'WON'
-          profit = won ? parseFloat((result as any)?.profit ?? '0') : 0
-        } else {
-          // Fallback offline: calcular localmente
-          won    = direction === 'CALL' ? exitPrice > entryPrice : exitPrice < entryPrice
-          profit = won ? Math.round(investment * payout) : 0
-        }
+        // Calculo local imediato — usado pra popup sem esperar RPC.
+        const localWon    = direction === 'CALL' ? exitPrice > entryPrice : exitPrice < entryPrice
+        const localProfit = localWon ? parseFloat((investment * (payout / 100)).toFixed(2)) : 0
 
+        // Popup imediato + limpa estado da trade ativa
         setOpenTrades(prev => prev.filter(t => t.id !== operationId))
         onTradeExpired?.(operationId)
-        setTradeResult({ direction, amount: investment, profit, won })
-        // Atualiza saldo na tela e recarrega histórico
+        setTradeResult({ direction, amount: investment, profit: localProfit, won: localWon })
+
+        // Em background: settle_trade no banco + refresh saldo. Se backend
+        // retornar resultado diferente, corrige o popup sem flicker bizarro.
+        if (!operationId.startsWith('local-')) {
+          try {
+            const { data: result } = await supabase.rpc('settle_trade', {
+              p_operation_id: operationId,
+              p_exit_price:   exitPrice,
+            })
+            const backendWon    = (result as any)?.status === 'WON'
+            const backendProfit = backendWon ? parseFloat((result as any)?.profit ?? '0') : 0
+            // So atualiza se diferente do calculo local — evita re-render desnecessario
+            if (backendWon !== localWon || backendProfit !== localProfit) {
+              setTradeResult({ direction, amount: investment, profit: backendProfit, won: backendWon })
+            }
+          } catch (err) {
+            console.warn('[trade] settle_trade falhou, mantendo resultado local:', err)
+          }
+        }
+
         await refreshAccounts()
         if (activeTab === 'historico') loadHistory()
       }, expiresInSec * 1000)
