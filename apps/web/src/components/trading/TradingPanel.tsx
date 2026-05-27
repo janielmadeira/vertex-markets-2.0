@@ -320,8 +320,13 @@ export const TradingPanel = forwardRef<TradingPanelHandle, TradingPanelProps>(fu
       const createdAtMs     = new Date(op.created_at).getTime()
       const remainingMs     = expiresAtMs - now
       const totalDurationSec = Math.round((expiresAtMs - createdAtMs) / 1000)
+      // UTC: usado pelo countdown local (compara com Date.now()/1000)
       const utcExpiryTime   = Math.floor(expiresAtMs / 1000)
-      const entryTime       = Math.floor(createdAtMs / 1000) + BRT_OFFSET
+      // BRT: usado pelo eixo de tempo do chart (timeline em UTC-3).
+      // entryTime e expiryTime precisam ESTAR NO MESMO offset, senao a linha
+      // de entrada fica fora do range visivel (estava 3h pra tras).
+      const entryTimeChart  = Math.floor(createdAtMs / 1000) + BRT_OFFSET
+      const expiryTimeChart = Math.floor(expiresAtMs / 1000) + BRT_OFFSET
 
       if (remainingMs <= 0) {
         // Já venceu enquanto o usuário estava fora — liquida imediatamente
@@ -332,7 +337,7 @@ export const TradingPanel = forwardRef<TradingPanelHandle, TradingPanelProps>(fu
         continue
       }
 
-      // Ainda ativa — recria no estado local
+      // Ainda ativa — recria no estado local (countdown usa UTC)
       toAdd.push({
         id: op.id,
         asset: assetObj,
@@ -344,13 +349,13 @@ export const TradingPanel = forwardRef<TradingPanelHandle, TradingPanelProps>(fu
         duration: totalDurationSec,
       })
 
-      // Notifica o gráfico para exibir a linha de entrada
+      // Notifica o gráfico (precisa de BRT em ambos os campos)
       onTradeOpened?.({
         id: op.id,
         assetId: assetObj.id,
         entryPrice: op.entry_price,
-        entryTime,
-        expiryTime: utcExpiryTime,
+        entryTime:  entryTimeChart,
+        expiryTime: expiryTimeChart,
         direction: op.direction as 'CALL' | 'PUT',
         amount: op.amount,
         payout: op.payout_pct,

@@ -80,7 +80,11 @@ export default function TradingPage() {
   }
 
   function handleTradeOpened(trade: ActiveTrade) {
-    setActiveTrades(prev => [...prev, trade])
+    // Dedupe por id — handleTradeOpened pode ser chamado mais de uma vez pra mesma
+    // operacao (loadOpenTrades em multiplas instancias de TradingPanel, ou React
+    // strict mode rodando useEffect 2x em dev). Sem dedupe, a linha de entrada
+    // aparece duplicada no chart e o contador de pendentes infla.
+    setActiveTrades(prev => prev.some(t => t.id === trade.id) ? prev : [...prev, trade])
     authStore.refreshAccounts()
   }
 
