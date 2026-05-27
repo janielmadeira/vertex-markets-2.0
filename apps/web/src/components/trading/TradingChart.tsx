@@ -509,7 +509,7 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
     if (tradesPosIntervalRef.current) clearInterval(tradesPosIntervalRef.current)
     if (activeTrades.length === 0) { setTradePositions({}); return }
 
-    tradesPosIntervalRef.current = setInterval(() => {
+    const updatePositions = () => {
       if (!chartRef.current || !seriesRef.current) return
       const ts = chartRef.current.timeScale()
       const tfSec = tfSecRef.current
@@ -528,7 +528,17 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
         }
         return next
       })
-    }, 200)
+    }
+
+    // Trade nova: scroll o chart pro tempo real (garante que entryTime esta no
+    // range visivel) e calcula a posicao imediatamente — sem isso, marker
+    // aparece em posicao errada nos primeiros 200ms ate o setInterval rodar.
+    if (chartRef.current) {
+      try { chartRef.current.timeScale().scrollToRealTime() } catch {}
+    }
+    updatePositions()
+
+    tradesPosIntervalRef.current = setInterval(updatePositions, 200)
 
     return () => {
       if (tradesPosIntervalRef.current) clearInterval(tradesPosIntervalRef.current)
