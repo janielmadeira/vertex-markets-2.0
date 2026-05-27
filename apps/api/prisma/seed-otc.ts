@@ -3,22 +3,42 @@ import { PrismaClient } from '@prisma/client'
 
 const prisma = new PrismaClient()
 
-// Pares OTC server-authoritative ativos. Cripto majors (BTC/ETH/SOL/XRP/DOGE)
-// usam feed real da Binance via marketSymbols.ts, entao nao precisam estar aqui
-// (timer desperdicaria CPU).
+// Catalogo OTC definitivo Vertex Markets MVP — 10 pares server-authoritative.
+// Mapping front correspondente em apps/web/src/lib/otcClient.ts (OTC_SYMBOL_MAP).
+//
+// O que NAO entra aqui (e por que):
+// - Cripto (BTC/ETH/SOL/XRP/BNB): feed real Binance via marketSymbols.ts
+// - Forex majors (EUR/USD, GBP/USD, USD/JPY): feed real Yahoo (versão LIVE)
+//   PORÉM duplicamos como -OTC aqui para operar 24/7 quando mercado real fecha
+//
+// Pra promover novo par a OTC server-authoritative:
+//   1) add aqui em SEEDS; 2) add asset em mockData.ts ASSETS; 3) add mapping em
+//   OTC_SYMBOL_MAP; 4) garante que asset.id NAO esta em REAL_ASSETS (sem conflito).
+// Volatility calibrada para o engine: mean-reversion hardcoded = 0.001/tick em rng.ts,
+// resulta em range estacionario 3σ ≈ volatility * 67 * 100 (em %). Valores escolhidos
+// para imitar comportamento Quotex-style (forex calmo, commodities mais agressivas).
 const SEEDS = [
-  // Forex (sem fonte real cobrindo bem -> OTC engine eh a escolha)
-  { symbol: 'USDBRL-OTC', name: 'USD/BRL OTC', basePrice: 5.74200,  volatility: 0.0008, payout: 85, decimals: 5 },
-  { symbol: 'USDCHF-OTC', name: 'USD/CHF OTC', basePrice: 0.89710,  volatility: 0.0006, payout: 85, decimals: 5 },
-  { symbol: 'EURAUD-OTC', name: 'EUR/AUD OTC', basePrice: 1.64230,  volatility: 0.0007, payout: 85, decimals: 5 },
-  // Acoes
-  { symbol: 'AAPL-OTC', name: 'Apple Inc OTC', basePrice: 189.21, volatility: 0.0015, payout: 85, decimals: 2 },
-  { symbol: 'TSLA-OTC', name: 'Tesla OTC',     basePrice: 172.80, volatility: 0.0025, payout: 85, decimals: 2 },
+  // Forex OTC — espelham os majors reais para cobrir fim de semana
+  { symbol: 'EURUSD-OTC', name: 'EUR/USD OTC', basePrice: 1.08540,    volatility: 0.00015, payout: 85, decimals: 5 },
+  { symbol: 'GBPUSD-OTC', name: 'GBP/USD OTC', basePrice: 1.27340,    volatility: 0.00015, payout: 85, decimals: 5 },
+  { symbol: 'USDJPY-OTC', name: 'USD/JPY OTC', basePrice: 158.92000,  volatility: 0.00018, payout: 85, decimals: 3 },
+  // Forex OTC exclusivos (sem versao real)
+  { symbol: 'USDBRL-OTC', name: 'USD/BRL OTC', basePrice: 5.20000,    volatility: 0.00025, payout: 85, decimals: 5 },
+  { symbol: 'EURJPY-OTC', name: 'EUR/JPY OTC', basePrice: 170.54000,  volatility: 0.00018, payout: 87, decimals: 3 },
+  { symbol: 'AUDCAD-OTC', name: 'AUD/CAD OTC', basePrice: 0.91800,    volatility: 0.00015, payout: 87, decimals: 5 },
+  { symbol: 'NZDUSD-OTC', name: 'NZD/USD OTC', basePrice: 0.59500,    volatility: 0.00015, payout: 87, decimals: 5 },
+  { symbol: 'USDCHF-OTC', name: 'USD/CHF OTC', basePrice: 0.89710,    volatility: 0.00015, payout: 85, decimals: 5 },
+  // Commodities OTC
+  { symbol: 'XAUUSD-OTC', name: 'Ouro OTC',    basePrice: 2680.50000, volatility: 0.00040, payout: 87, decimals: 2 },
+  { symbol: 'XAGUSD-OTC', name: 'Prata OTC',   basePrice: 31.40000,   volatility: 0.00055, payout: 85, decimals: 3 },
 ]
 
-// Symbols que existiam em seed anterior mas viraram dormentes -> desativa
-// (mantem dados historicos no banco mas para o engine de gastar CPU com elas).
-const DEPRECATED = ['BTCUSD-OTC', 'ETHUSD-OTC', 'SOLUSD-OTC', 'XRPUSD-OTC', 'DOGEUSD-OTC']
+// Symbols que ja existiram em seeds anteriores mas nao fazem mais parte do catalogo.
+// Sao marcados INACTIVE para o engine parar de gastar CPU. Historico fica preservado.
+const DEPRECATED = [
+  'BTCUSD-OTC', 'ETHUSD-OTC', 'SOLUSD-OTC', 'XRPUSD-OTC', 'DOGEUSD-OTC',
+  'EURAUD-OTC', 'AAPL-OTC', 'TSLA-OTC',
+]
 
 async function main() {
   console.log(`Seeding ${SEEDS.length} OTC assets...`)

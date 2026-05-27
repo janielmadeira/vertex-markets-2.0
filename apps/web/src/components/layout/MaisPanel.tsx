@@ -56,26 +56,26 @@ function Avatar({ flag }: { flag: string }) {
   )
 }
 
-/* ─── Sinais mock data ─── */
+/* ─── Sinais mock data ─── (refletindo catalogo atual de 18 ativos) */
 const SINAIS_ATIVOS = [
-  { assetId: 'bch-otc',      name: 'Bitcoin Cash (OTC)',       code1: 'crypto:bch', code2: 'us', dir: 'down', dur: '15:00', time: '20.05 21:07' },
-  { assetId: 'dot-otc',      name: 'Polkadot (OTC)',           code1: 'crypto:dot', code2: 'us', dir: 'down', dur: '15:00', time: '20.05 21:07' },
-  { assetId: 'usd-ngn-otc',  name: 'USD/NGN (OTC)',            code1: 'us', code2: 'ng',         dir: 'up',   dur: '15:00', time: '20.05 21:06' },
-  { assetId: 'silver',       name: 'Silver (OTC)',             code1: 'us', code2: 'us',         dir: 'up',   dur: '05:00', time: '20.05 21:06' },
-  { assetId: 'aud-usd',      name: 'AUD/USD (OTC)',            code1: 'au', code2: 'us',         dir: 'up',   dur: '01:00:00', time: '20.05 21:07' },
-  { assetId: 'link-otc',     name: 'Chainlink (OTC)',          code1: 'crypto:link', code2: 'us', dir: 'up',  dur: '30:00', time: '20.05 21:07' },
-  { assetId: 'usd-jpy',      name: 'USD/JPY (OTC)',            code1: 'us', code2: 'jp',         dir: 'down', dur: '04:00:00', time: '20.05 21:07' },
-  { assetId: 'eur-chf-otc',  name: 'EUR/CHF (OTC)',            code1: 'eu', code2: 'ch',         dir: 'down', dur: '10:00', time: '20.05 21:07' },
-  { assetId: 'usd-mxn-otc',  name: 'USD/MXN (OTC)',           code1: 'us', code2: 'mx',         dir: 'up',   dur: '05:00', time: '20.05 21:07' },
-  { assetId: 'usd-brl-otc',  name: 'USD/BRL (OTC)',           code1: 'us', code2: 'br',         dir: 'up',   dur: '10:00', time: '20.05 21:07' },
+  { assetId: 'btc',           name: 'Bitcoin',         code1: 'crypto:btc', code2: 'us', dir: 'up',   dur: '15:00',    time: '27.05 09:07' },
+  { assetId: 'eur-usd-otc',   name: 'EUR/USD (OTC)',   code1: 'eu',         code2: 'us', dir: 'down', dur: '05:00',    time: '27.05 09:06' },
+  { assetId: 'xau-usd-otc',   name: 'Ouro (OTC)',      code1: 'us',         code2: 'us', dir: 'up',   dur: '15:00',    time: '27.05 09:06' },
+  { assetId: 'gbp-usd',       name: 'GBP/USD',         code1: 'gb',         code2: 'us', dir: 'up',   dur: '01:00:00', time: '27.05 09:05' },
+  { assetId: 'eth',           name: 'Ethereum',        code1: 'crypto:eth', code2: 'us', dir: 'up',   dur: '30:00',    time: '27.05 09:05' },
+  { assetId: 'usd-jpy',       name: 'USD/JPY',         code1: 'us',         code2: 'jp', dir: 'down', dur: '04:00:00', time: '27.05 09:04' },
+  { assetId: 'usd-chf-otc',   name: 'USD/CHF (OTC)',   code1: 'us',         code2: 'ch', dir: 'down', dur: '10:00',    time: '27.05 09:04' },
+  { assetId: 'aud-cad-otc',   name: 'AUD/CAD (OTC)',   code1: 'au',         code2: 'ca', dir: 'up',   dur: '05:00',    time: '27.05 09:03' },
+  { assetId: 'usd-brl-otc',   name: 'USD/BRL (OTC)',   code1: 'us',         code2: 'br', dir: 'up',   dur: '10:00',    time: '27.05 09:03' },
+  { assetId: 'eur-jpy-otc',   name: 'EUR/JPY (OTC)',   code1: 'eu',         code2: 'jp', dir: 'down', dur: '15:00',    time: '27.05 09:02' },
 ]
 
 const SINAIS_PASSADOS = [
-  { assetId: 'trump-otc',    name: 'Trump (OTC)',   code1: 'us', code2: 'us',         dir: 'down', dur: '05:00', time: '20.05 21:05' },
-  { assetId: 'gbp-chf-otc',  name: 'GBP/CHF (OTC)',code1: 'gb', code2: 'ch',         dir: 'down', dur: '15:00', time: '20.05 21:04' },
-  { assetId: 'aud-nzd-otc',  name: 'AUD/NZD (OTC)',code1: 'au', code2: 'nz',         dir: 'down', dur: '15:00', time: '20.05 21:03' },
-  { assetId: 'aud-usd',      name: 'AUD/USD',       code1: 'au', code2: 'us',         dir: 'up',   dur: '10:00', time: '20.05 21:02' },
-  { assetId: 'gbp-usd',      name: 'GBP/USD',       code1: 'gb', code2: 'us',         dir: 'down', dur: '05:00', time: '20.05 21:01' },
+  { assetId: 'sol',           name: 'Solana',          code1: 'crypto:sol', code2: 'us', dir: 'up',   dur: '05:00', time: '27.05 08:55' },
+  { assetId: 'xag-usd-otc',   name: 'Prata (OTC)',     code1: 'us',         code2: 'us', dir: 'down', dur: '15:00', time: '27.05 08:50' },
+  { assetId: 'nzd-usd-otc',   name: 'NZD/USD (OTC)',   code1: 'nz',         code2: 'us', dir: 'down', dur: '15:00', time: '27.05 08:48' },
+  { assetId: 'eur-usd',       name: 'EUR/USD',         code1: 'eu',         code2: 'us', dir: 'up',   dur: '10:00', time: '27.05 08:45' },
+  { assetId: 'gbp-usd-otc',   name: 'GBP/USD (OTC)',   code1: 'gb',         code2: 'us', dir: 'down', dur: '05:00', time: '27.05 08:42' },
 ]
 
 function getImgSrc(code: string) {

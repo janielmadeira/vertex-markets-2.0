@@ -7,18 +7,40 @@ import type { CreateOperationInput } from './schema.js'
 // Tolerancia maxima entre entryPrice enviado pelo cliente e preco atual do servidor.
 const ENTRY_PRICE_TOLERANCE = 0.002
 
-const SERVER_AUTH_SYMBOLS = new Set([
-  'USDBRL-OTC', 'USDCHF-OTC', 'EURAUD-OTC', 'AAPL-OTC', 'TSLA-OTC',
-])
+// Set de simbolos OTC server-authoritative, alimentado dinamicamente do banco.
+// Refresh a cada 30s pega ativos adicionados/desativados via admin sem precisar deploy.
+// Se o banco estiver indisponivel no startup, fica vazio ate o proximo refresh dar certo.
+let serverAuthSymbols = new Set<string>()
+let lastRefreshAt = 0
+const REFRESH_INTERVAL_MS = 30_000
+
+async function refreshServerAuthSymbols() {
+  try {
+    const rows = await prisma.otcAsset.findMany({
+      where:  { status: 'ACTIVE' },
+      select: { symbol: true },
+    })
+    serverAuthSymbols = new Set(rows.map(r => r.symbol))
+    lastRefreshAt = Date.now()
+  } catch (err: any) {
+    console.error('[operations] refreshServerAuthSymbols failed:', err.message)
+  }
+}
+
+// Refresh lazy: se passou o intervalo, recarrega antes de validar.
+// Evita setInterval orfao em testes/scripts que importam o modulo sem subir o app.
+async function ensureFreshSymbols() {
+  if (Date.now() - lastRefreshAt > REFRESH_INTERVAL_MS) await refreshServerAuthSymbols()
+}
 
 function isServerAuthoritative(assetSymbol: string): boolean {
-  if (SERVER_AUTH_SYMBOLS.has(assetSymbol)) return true
+  if (serverAuthSymbols.has(assetSymbol)) return true
   const canonical = assetSymbol.replace(/[\/\-\s]/g, '').toUpperCase() + '-OTC'
-  return SERVER_AUTH_SYMBOLS.has(canonical)
+  return serverAuthSymbols.has(canonical)
 }
 
 function canonicalSymbol(assetSymbol: string): string {
-  if (SERVER_AUTH_SYMBOLS.has(assetSymbol)) return assetSymbol
+  if (serverAuthSymbols.has(assetSymbol)) return assetSymbol
   return assetSymbol.replace(/[\/\-\s]/g, '').toUpperCase() + '-OTC'
 }
 
@@ -52,6 +74,8 @@ function computeAuditHash(parts: {
 }
 
 export async function createOperation(userId: string, input: CreateOperationInput) {
+  await ensureFreshSymbols()
+
   const account = await prisma.account.findUnique({ where: { id: input.accountId } })
   if (!account || account.userId !== userId) throw new Error('ACCOUNT_NOT_FOUND')
 
@@ -120,6 +144,8 @@ function scheduleExpiry(
 ) {
   setTimeout(async () => {
     try {
+      await ensureFreshSymbols()
+
       const op = await prisma.operation.findUnique({ where: { id: operationId } })
       if (!op || op.status !== 'OPEN') return
 

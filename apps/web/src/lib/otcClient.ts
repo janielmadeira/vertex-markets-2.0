@@ -16,23 +16,21 @@ export type OtcSubscription = {
   close: () => void
 }
 
-// Tabela explícita: somente estes 10 pares têm gerador server-authoritative.
-// Asset IDs no front são irregulares (ex: "btc-otc" vs "usd-brl-otc"), então
-// um mapeamento explícito é mais seguro que derivar por string.
+// Pares roteados para o OTC engine proprio (server-authoritative).
+// Cripto/forex com feed real (Binance/Yahoo) NAO entram aqui — ver REAL_ASSETS em
+// marketSymbols.ts. Pra adicionar um par: garanta que o symbol esteja em otc_assets
+// como ACTIVE no banco Supabase (admin -> POST /market-data/otc-admin).
 const OTC_SYMBOL_MAP: Record<string, string> = {
-  // Forex
+  'eur-usd-otc': 'EURUSD-OTC',
+  'gbp-usd-otc': 'GBPUSD-OTC',
+  'usd-jpy-otc': 'USDJPY-OTC',
   'usd-brl-otc': 'USDBRL-OTC',
+  'eur-jpy-otc': 'EURJPY-OTC',
+  'aud-cad-otc': 'AUDCAD-OTC',
+  'nzd-usd-otc': 'NZDUSD-OTC',
   'usd-chf-otc': 'USDCHF-OTC',
-  'eur-aud-otc': 'EURAUD-OTC',
-  // Cripto
-  'btc-otc':  'BTCUSD-OTC',
-  'eth-otc':  'ETHUSD-OTC',
-  'sol-otc':  'SOLUSD-OTC',
-  'xrp-otc':  'XRPUSD-OTC',
-  'doge-otc': 'DOGEUSD-OTC',
-  // Ações
-  'aapl-otc': 'AAPL-OTC',
-  'tsla-otc': 'TSLA-OTC',
+  'xau-usd-otc': 'XAUUSD-OTC',
+  'xag-usd-otc': 'XAGUSD-OTC',
 }
 
 // Mapeia asset.id do front para o símbolo do backend. Retorna null se o asset

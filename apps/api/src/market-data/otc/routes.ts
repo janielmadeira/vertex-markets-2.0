@@ -73,7 +73,12 @@ export async function otcPublicRoutes(app: FastifyInstance) {
     return { symbol, price: Number(cached), t: Math.floor(Date.now() / 1000) }
   })
 
-  // Histórico de candles — buffer Redis primeiro, fallback Postgres
+  // Historico de candles — Redis (hot) com fallback Postgres (cold).
+  //
+  // Estrategia: so usa Redis se tiver pelo menos limit/2 candles. Senao, vai pro
+  // Postgres (autoritativo). Evita o cenario em que Redis esta esparso (engine
+  // com problema ou recem-restartado) e o chart recebe so 5-10 candles em vez
+  // dos 300 que o Postgres tem.
   app.get('/:symbol/candles', async (req, reply) => {
     const { symbol } = req.params as { symbol: string }
     const q = req.query as { tf?: string; limit?: string }
@@ -81,12 +86,13 @@ export async function otcPublicRoutes(app: FastifyInstance) {
     const limit = Math.min(parseInt(q.limit ?? '200', 10), 500)
     if (![5, 15, 60, 300].includes(tf)) return reply.status(400).send({ error: 'INVALID_TF' })
 
+    const MIN_REDIS_COVERAGE = Math.ceil(limit / 2)
     const raw = await redis.zrevrange(KEYS.candleBuffer(symbol, tf), 0, limit - 1)
-    if (raw.length > 0) {
+    if (raw.length >= MIN_REDIS_COVERAGE) {
       return { symbol, tf, candles: raw.map(s => JSON.parse(s)).reverse() }
     }
 
-    // fallback: Postgres
+    // Redis esparso/vazio -> Postgres autoritativo
     const asset = await prisma.otcAsset.findUnique({ where: { symbol } })
     if (!asset) return reply.status(404).send({ error: 'ASSET_NOT_FOUND' })
     const rows = await prisma.otcCandle.findMany({

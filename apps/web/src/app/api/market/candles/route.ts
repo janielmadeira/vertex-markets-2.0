@@ -1,8 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { Candle } from '@/lib/mockData'
+import { tfToTwelveDataInterval } from '@/lib/marketSymbols'
 
 const cache = new Map<string, { candles: Candle[]; ts: number }>()
-const CACHE_TTL = 60_000 // 1 min
+
+// TTLs diferenciados. Twelve Data tem cota (800/dia), entao historicos cacheados
+// por 5min — calls historicas sao raras (so quando usuario abre par ou troca tf).
+const CACHE_TTL: Record<string, number> = {
+  binance:    60_000,
+  yahoo:      60_000,
+  twelvedata: 300_000,
+}
 
 const BRT_OFFSET = -3 * 3600
 
@@ -62,9 +70,32 @@ async function fetchBinanceCandles(symbol: string, interval: string, limit: numb
   }))
 }
 
+async function fetchTwelveDataCandles(symbol: string, tfSeconds: number, limit: number): Promise<Candle[]> {
+  const apiKey = process.env.TWELVE_DATA_API_KEY
+  if (!apiKey) throw new Error('TWELVE_DATA_API_KEY not configured')
+
+  const interval = tfToTwelveDataInterval(tfSeconds)
+  if (!interval) throw new Error(`Twelve Data: timeframe ${tfSeconds}s not supported`)
+
+  const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(symbol)}&interval=${interval}&outputsize=${limit}&apikey=${apiKey}`
+  const res = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
+  const json = await res.json()
+  if (json.status === 'error') throw new Error(`Twelve Data: ${json.message}`)
+  if (!Array.isArray(json.values)) throw new Error('Twelve Data: invalid response')
+
+  // Twelve Data devolve em ordem desc (mais recente primeiro). Invertemos para asc.
+  return json.values.map((v: any) => ({
+    time:  Math.floor(new Date(v.datetime + 'Z').getTime() / 1000) + BRT_OFFSET,
+    open:  parseFloat(v.open),
+    high:  parseFloat(v.high),
+    low:   parseFloat(v.low),
+    close: parseFloat(v.close),
+  })).reverse()
+}
+
 export async function GET(req: NextRequest) {
   const symbol   = req.nextUrl.searchParams.get('symbol')
-  const source   = req.nextUrl.searchParams.get('source') as 'yahoo' | 'binance' | null
+  const source   = req.nextUrl.searchParams.get('source') as 'yahoo' | 'binance' | 'twelvedata' | null
   const interval = req.nextUrl.searchParams.get('interval') ?? '60'
   const limit    = Math.min(500, parseInt(req.nextUrl.searchParams.get('limit') ?? '80'))
 
@@ -72,17 +103,19 @@ export async function GET(req: NextRequest) {
 
   const cacheKey = `${source}:${symbol}:${interval}:${limit}`
   const cached   = cache.get(cacheKey)
-  if (cached && Date.now() - cached.ts < CACHE_TTL) {
-    return NextResponse.json({ candles: cached.candles })
+  const ttl      = CACHE_TTL[source] ?? 60_000
+  if (cached && Date.now() - cached.ts < ttl) {
+    return NextResponse.json({ candles: cached.candles, cached: true })
   }
 
   try {
     let candles: Candle[]
     if (source === 'binance') {
       candles = await fetchBinanceCandles(symbol, interval, limit)
+    } else if (source === 'twelvedata') {
+      candles = await fetchTwelveDataCandles(symbol, parseInt(interval), limit)
     } else {
-      const tfSeconds = parseInt(interval)
-      candles = await fetchYahooCandles(symbol, tfSeconds, limit)
+      candles = await fetchYahooCandles(symbol, parseInt(interval), limit)
     }
     cache.set(cacheKey, { candles, ts: Date.now() })
     return NextResponse.json({ candles })

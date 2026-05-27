@@ -68,44 +68,67 @@ async function loadAssets() {
   for (const id of state.keys()) if (!ids.has(id)) state.delete(id)
 }
 
+// Re-entry guard: setInterval pode disparar antes do tick anterior terminar.
+// Sem isso, ticks rodam concorrente e o state compartilhado corrompe (assets sao
+// pulados, candles sao gravados com OHLC errado, etc).
+let tickInFlight = false
+
 async function tickOnce() {
-  const now = Math.floor(Date.now() / 1000)
+  if (tickInFlight) return
+  tickInFlight = true
 
-  for (const asset of state.values()) {
-    const seed = `${asset.id}:${now}`
-    const raw  = nextPrice({
-      currentPrice: asset.price,
-      basePrice:    asset.basePrice,
-      volatility:   asset.volatility,
-      trend:        asset.trend,
-      seed,
-    })
-    asset.price = round(raw, asset.decimals)
+  try {
+    const now = Math.floor(Date.now() / 1000)
 
-    const payload = JSON.stringify({ symbol: asset.symbol, price: asset.price, t: now })
+    for (const asset of state.values()) {
+      // ── Atualizacao SINCRONA do state ─────────────────────────────────
+      // Tudo aqui e sync (sem await) — garante que o state se mantem coerente
+      // entre ticks. Custo: ~microssegundos por asset.
+      const seed = `${asset.id}:${now}`
+      const raw  = nextPrice({
+        currentPrice: asset.price,
+        basePrice:    asset.basePrice,
+        volatility:   asset.volatility,
+        trend:        asset.trend,
+        seed,
+      })
+      asset.price = round(raw, asset.decimals)
 
-    // persist + broadcast em paralelo
-    await Promise.all([
-      redis.set(KEYS.price(asset.symbol), String(asset.price)),
-      redisPub.publish(KEYS.tickChannel(asset.symbol), payload),
-    ])
+      // ── I/O FIRE-AND-FORGET ───────────────────────────────────────────
+      // Redis SET/PUBLISH nao precisam de retorno — dispara sem aguardar.
+      // Se Redis tiver latencia, nao afeta a sincronia dos ticks.
+      const payload = JSON.stringify({ symbol: asset.symbol, price: asset.price, t: now })
+      redis.set(KEYS.price(asset.symbol), String(asset.price)).catch(e => console.error('[otc-engine] redis.set:', e.message))
+      redisPub.publish(KEYS.tickChannel(asset.symbol), payload).catch(e => console.error('[otc-engine] redis.publish:', e.message))
 
-    // agrega cada timeframe
-    for (const tf of TIMEFRAMES) {
-      const openTime = alignWindow(now, tf)
-      let candle = asset.candles.get(tf)
+      // ── Agrega cada timeframe (sync) ──────────────────────────────────
+      for (const tf of TIMEFRAMES) {
+        const openTime = alignWindow(now, tf)
+        const candle = asset.candles.get(tf)
 
-      if (!candle || candle.openTime !== openTime) {
-        // candle anterior fechou → persiste
-        if (candle) await persistCandle(asset, tf, candle)
-        candle = { openTime, open: asset.price, high: asset.price, low: asset.price, close: asset.price }
-        asset.candles.set(tf, candle)
-      } else {
-        candle.high  = Math.max(candle.high, asset.price)
-        candle.low   = Math.min(candle.low,  asset.price)
-        candle.close = asset.price
+        if (!candle || candle.openTime !== openTime) {
+          // Candle anterior fechou: dispara persist sem aguardar.
+          // O candle antigo nao sera mais mutado (substituido por novo no Map),
+          // entao persistCandle ve valores estaveis mesmo sem await.
+          if (candle) {
+            persistCandle(asset, tf, candle).catch(e => console.error('[otc-engine] persistCandle bg:', e.message))
+          }
+          asset.candles.set(tf, {
+            openTime,
+            open:  asset.price,
+            high:  asset.price,
+            low:   asset.price,
+            close: asset.price,
+          })
+        } else {
+          candle.high  = Math.max(candle.high, asset.price)
+          candle.low   = Math.min(candle.low,  asset.price)
+          candle.close = asset.price
+        }
       }
     }
+  } finally {
+    tickInFlight = false
   }
 }
 

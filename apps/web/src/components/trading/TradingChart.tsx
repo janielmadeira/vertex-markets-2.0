@@ -608,6 +608,7 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
           background: { type: ColorType.Solid, color: tc.bg },
           textColor: tc.text,
           fontSize: 11,
+          attributionLogo: false,  // remove watermark "TV" do lightweight-charts v5+
         },
         grid: {
           vertLines: { color: tc.grid, style: 1 },
@@ -695,9 +696,22 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
       //     mapeado E o asset não tem fonte real (Binance/Yahoo) — caso contrário, os ticks
       //     OTC conflitam com o feed real e fazem o preço saltar (ex: BTC histórico 77k da
       //     Binance + tick OTC a 67k = candle gigante de queda fantasma).
+      //
+      // Tambem requisita reset quando o tick do WS diverge >0.5% do ultimo candle
+      // historico — engine pode ter restartado/driftado entre persistir candle e enviar
+      // o tick atual, causando candle gigante na transicao hist -> live.
+      const PRICE_GAP_THRESHOLD = 0.005  // 0.5%
       if (otcSymbolForHistory && !realConfig && process.env.NEXT_PUBLIC_OTC_WS !== '0') {
         otcWs = subscribeOtc(otcSymbolForHistory, (tick) => {
-          if (otcWsPrice == null && !otcBackendActive) otcResetNeeded = true
+          if (otcWsPrice == null) {
+            // Primeiro tick — decide se precisa resetar o candle vivo
+            const lastClose = candles[candles.length - 1]?.close
+            if (!otcBackendActive) {
+              otcResetNeeded = true  // fallback mock → tick real
+            } else if (lastClose != null && Math.abs(tick.price - lastClose) / lastClose > PRICE_GAP_THRESHOLD) {
+              otcResetNeeded = true  // backend hist desincronizado com tick atual
+            }
+          }
           otcWsPrice = tick.price
         })
       }
@@ -1070,7 +1084,7 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
       const tc = THEME_COLORS[theme]
 
       oscChart = createChart(oscChartContainerRef.current, {
-        layout: { background: { type: ColorType.Solid, color: tc.bg }, textColor: tc.text, fontSize: 10 },
+        layout: { background: { type: ColorType.Solid, color: tc.bg }, textColor: tc.text, fontSize: 10, attributionLogo: false },
         grid:   { vertLines: { color: tc.grid }, horzLines: { color: tc.grid } },
         rightPriceScale: { borderColor: tc.border, textColor: tc.text, scaleMargins: { top: 0.1, bottom: 0.1 } },
         timeScale: { borderColor: tc.border, timeVisible: false, visible: false },
