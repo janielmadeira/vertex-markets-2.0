@@ -337,15 +337,26 @@ export const TradingPanel = forwardRef<TradingPanelHandle, TradingPanelProps>(fu
   const loadHistory = useCallback(async () => {
     if (!accountId) return
     setHistoryLoading(true)
-    const { data } = await supabase
-      .from('operations')
-      .select('id, asset_symbol, direction, amount, payout_pct, entry_price, exit_price, status, profit, created_at, closed_at')
-      .eq('account_id', accountId)
-      .in('status', ['WON', 'LOST', 'DRAW'])
-      .order('closed_at', { ascending: false })
-      .limit(50)
-    setHistory((data ?? []) as ClosedTrade[])
-    setHistoryLoading(false)
+    try {
+      const { data, error } = await supabase
+        .from('operations')
+        .select('id, asset_symbol, direction, amount, payout_pct, entry_price, exit_price, status, profit, created_at, closed_at')
+        .eq('account_id', accountId)
+        .in('status', ['WON', 'LOST', 'DRAW'])
+        .order('closed_at', { ascending: false })
+        .limit(50)
+      if (error) {
+        console.warn('[history] supabase error:', error.message)
+      } else {
+        setHistory((data ?? []) as ClosedTrade[])
+      }
+    } catch (err) {
+      // Sem try/catch + finally, qualquer falha (rede, auth expirado, RLS)
+      // deixava historyLoading=true pra sempre -> "Carregando..." eterno.
+      console.warn('[history] fetch failed:', err)
+    } finally {
+      setHistoryLoading(false)
+    }
   }, [accountId])
 
   useEffect(() => {
