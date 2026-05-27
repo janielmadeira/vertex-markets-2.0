@@ -222,6 +222,62 @@ export const TradingPanel = forwardRef<TradingPanelHandle, TradingPanelProps>(fu
     return () => clearTimeout(t)
   }, [tradeResult])
 
+  // Reconcilia o resultado mostrado no popup com o resultado oficial do banco.
+  // Trata o caso comum em que o backend api (service.ts setTimeout) ja liquidou
+  // a operacao antes do cliente chamar settle_trade — nesse caso a RPC retorna
+  // erro OPERATION_NOT_FOUND e precisamos buscar o status real direto da tabela.
+  // So atualiza o popup se tivermos certeza do resultado oficial e ele divergir.
+  async function reconcileWithBackend(
+    operationId: string,
+    exitPrice:   number,
+    direction:   'CALL' | 'PUT',
+    investment:  number,
+    localWon:    boolean,
+    localProfit: number,
+  ) {
+    let backendStatus: 'WON' | 'LOST' | 'DRAW' | null = null
+    let backendProfit = 0
+    try {
+      const { data: result, error } = await supabase.rpc('settle_trade', {
+        p_operation_id: operationId,
+        p_exit_price:   exitPrice,
+      })
+      if (error) {
+        // OPERATION_NOT_FOUND = backend ja liquidou antes; buscar resultado oficial.
+        if (String(error.message ?? '').includes('OPERATION_NOT_FOUND')) {
+          const { data: op } = await supabase
+            .from('operations')
+            .select('status, profit')
+            .eq('id', operationId)
+            .single()
+          if (op && ['WON', 'LOST', 'DRAW'].includes(op.status as string)) {
+            backendStatus = op.status as 'WON' | 'LOST' | 'DRAW'
+            backendProfit = Number(op.profit ?? 0)
+          }
+        } else {
+          console.warn('[trade] settle_trade erro inesperado:', error.message)
+        }
+      } else if (result && (result as any).status) {
+        const s = String((result as any).status)
+        if (['WON', 'LOST', 'DRAW'].includes(s)) {
+          backendStatus = s as 'WON' | 'LOST' | 'DRAW'
+          backendProfit = Number((result as any).profit ?? 0)
+        }
+      }
+    } catch (err) {
+      console.warn('[trade] reconcileWithBackend falhou:', err)
+      return
+    }
+
+    // Sem resultado oficial — mantem popup local.
+    if (!backendStatus) return
+
+    const backendWon = backendStatus === 'WON'
+    if (backendWon === localWon && Math.abs(backendProfit - localProfit) < 0.01) return
+
+    setTradeResult({ direction, amount: investment, profit: backendWon ? backendProfit : 0, won: backendWon })
+  }
+
   const refreshAccounts = useAuthStore(s => s.refreshAccounts)
 
   // Histórico de operações fechadas
@@ -363,13 +419,12 @@ export const TradingPanel = forwardRef<TradingPanelHandle, TradingPanelProps>(fu
 
       // Reregistra o timer de liquidação com o tempo restante real.
       // Mesma estrategia do caminho fresh (placeTrade): popup imediato com
-      // calculo local + settle no banco em background pra confirmar.
+      // calculo local + reconcileWithBackend para corrigir se necessario.
       const tid = setTimeout(async () => {
         timeoutMap.current.delete(op.id)
         const exitPrice = livePriceRef.current ?? assetObj.price
         const dir = op.direction as 'CALL' | 'PUT'
 
-        // Popup imediato (sem esperar RPC do Supabase)
         const localWon    = dir === 'CALL' ? exitPrice > op.entry_price : exitPrice < op.entry_price
         const localProfit = localWon ? parseFloat((op.amount * (op.payout_pct / 100)).toFixed(2)) : 0
 
@@ -377,21 +432,7 @@ export const TradingPanel = forwardRef<TradingPanelHandle, TradingPanelProps>(fu
         onTradeExpired?.(op.id)
         setTradeResult({ direction: dir, amount: op.amount, profit: localProfit, won: localWon })
 
-        // Background: confirma com backend, corrige popup se divergir
-        try {
-          const { data: result } = await supabase.rpc('settle_trade', {
-            p_operation_id: op.id,
-            p_exit_price:   exitPrice,
-          })
-          const backendWon    = (result as any)?.status === 'WON'
-          const backendProfit = backendWon ? parseFloat((result as any)?.profit ?? '0') : 0
-          if (backendWon !== localWon || backendProfit !== localProfit) {
-            setTradeResult({ direction: dir, amount: op.amount, profit: backendProfit, won: backendWon })
-          }
-        } catch (err) {
-          console.warn('[trade] settle_trade falhou (recuperada), mantendo resultado local:', err)
-        }
-
+        await reconcileWithBackend(op.id, exitPrice, dir, op.amount, localWon, localProfit)
         await refreshAccounts()
         loadHistory()
       }, remainingMs)
@@ -559,41 +600,24 @@ export const TradingPanel = forwardRef<TradingPanelHandle, TradingPanelProps>(fu
       setConfirmTrade(null)
 
       // Liquidar operação ao expirar com o preço atual no momento da expiração.
-      // UX: mostra popup IMEDIATO baseado no preço local (livePriceRef = mesmo
-      // que aparece no chart). Em paralelo, chama settle_trade no banco pra
-      // persistir resultado oficial. Se backend discordar (raro), o resultado
-      // oficial sobrescreve o popup (mas geralmente concordam porque o
-      // livePriceRef vem do mesmo engine OTC que o backend usa).
+      // UX: popup IMEDIATO baseado no preço local (livePriceRef = mesmo que aparece
+      // no chart). Em paralelo, busca o resultado oficial do banco. Se houver
+      // divergencia clara, atualiza o popup. Se nao, mantem o local.
       const tidPlace = setTimeout(async () => {
         timeoutMap.current.delete(operationId)
         const exitPrice = livePriceRef.current ?? asset.price
 
-        // Calculo local imediato — usado pra popup sem esperar RPC.
+        // Calculo local imediato — popup sem esperar nada do servidor
         const localWon    = direction === 'CALL' ? exitPrice > entryPrice : exitPrice < entryPrice
         const localProfit = localWon ? parseFloat((investment * (payout / 100)).toFixed(2)) : 0
 
-        // Popup imediato + limpa estado da trade ativa
         setOpenTrades(prev => prev.filter(t => t.id !== operationId))
         onTradeExpired?.(operationId)
         setTradeResult({ direction, amount: investment, profit: localProfit, won: localWon })
 
-        // Em background: settle_trade no banco + refresh saldo. Se backend
-        // retornar resultado diferente, corrige o popup sem flicker bizarro.
+        // Background: confirma resultado oficial no banco
         if (!operationId.startsWith('local-')) {
-          try {
-            const { data: result } = await supabase.rpc('settle_trade', {
-              p_operation_id: operationId,
-              p_exit_price:   exitPrice,
-            })
-            const backendWon    = (result as any)?.status === 'WON'
-            const backendProfit = backendWon ? parseFloat((result as any)?.profit ?? '0') : 0
-            // So atualiza se diferente do calculo local — evita re-render desnecessario
-            if (backendWon !== localWon || backendProfit !== localProfit) {
-              setTradeResult({ direction, amount: investment, profit: backendProfit, won: backendWon })
-            }
-          } catch (err) {
-            console.warn('[trade] settle_trade falhou, mantendo resultado local:', err)
-          }
+          await reconcileWithBackend(operationId, exitPrice, direction, investment, localWon, localProfit)
         }
 
         await refreshAccounts()
