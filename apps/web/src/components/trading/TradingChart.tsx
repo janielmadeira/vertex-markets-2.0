@@ -360,6 +360,7 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
   const isMobile = useIsMobile() === true
   const [activeIndicators, setActiveIndicators] = useState<Set<string>>(new Set())
   const [chartKey, setChartKey] = useState(0) // incrementa cada vez que o gráfico é recriado
+  const [isLoading, setIsLoading] = useState(true) // true enquanto fetch + render do chart inicial
   const [alertSet, setAlertSet] = useState(false)
   const [bbSettings, setBBSettings] = useState<BBSettings>(BB_DEFAULTS)
   const [bbEditOpen, setBBEditOpen] = useState(false)
@@ -589,6 +590,10 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
   }, [])
 
   useEffect(() => {
+    // Sinaliza loading no inicio de cada troca de asset/tf/chartType.
+    // Skeleton overlay fica visivel ate o chart renderizar (setIsLoading(false)).
+    setIsLoading(true)
+
     let chart: any = null
     let priceInterval: ReturnType<typeof setInterval>
     let realPriceInterval: ReturnType<typeof setInterval> | null = null
@@ -796,6 +801,7 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
 
       seriesRef.current = mainSeries
       setChartKey(k => k + 1) // sinaliza que o gráfico está pronto para receber price lines
+      setIsLoading(false)     // libera o skeleton — chart ja tem dados renderizados
 
       // Dashed price line at current close — estilo Quotex
       mainSeries.applyOptions({
@@ -1792,6 +1798,29 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
         className="absolute inset-0"
         style={{ bottom: oscActive ? 130 : 0, touchAction: 'none' }}
       />
+
+      {/* Skeleton loading overlay — visivel enquanto chart busca/renderiza dados.
+          Reduz percepção de lentidão ao trocar de par. */}
+      {isLoading && (
+        <div
+          className="absolute inset-0 flex items-center justify-center pointer-events-none"
+          style={{
+            bottom: oscActive ? 130 : 0,
+            backgroundColor: THEME_COLORS[theme].bg,
+          }}
+        >
+          {/* Grid skeleton — imita as linhas do chart pra dar sensação de continuidade */}
+          <div className="absolute inset-0 opacity-30 animate-pulse" style={{
+            backgroundImage: `linear-gradient(${THEME_COLORS[theme].grid} 1px, transparent 1px), linear-gradient(90deg, ${THEME_COLORS[theme].grid} 1px, transparent 1px)`,
+            backgroundSize: '60px 50px',
+          }} />
+          {/* Spinner central */}
+          <div className="relative flex flex-col items-center gap-2 opacity-70">
+            <div className="w-8 h-8 border-2 border-[#26a69a] border-t-transparent rounded-full animate-spin" />
+            <span className="text-[10px] text-[#8b8f9a] font-medium uppercase tracking-wider">Carregando</span>
+          </div>
+        </div>
+      )}
 
       {/* Oscillator sub-panel — absolute at the bottom */}
       {oscActive && (
