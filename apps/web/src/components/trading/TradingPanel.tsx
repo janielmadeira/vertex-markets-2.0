@@ -214,6 +214,9 @@ export const TradingPanel = forwardRef<TradingPanelHandle, TradingPanelProps>(fu
   const [confirmTrade, setConfirmTrade] = useState<'CALL' | 'PUT' | null>(null)
   const [activeTab, setActiveTab] = useState<'operacoes' | 'historico' | 'pedidos'>('pedidos')
   const [placing, setPlacing] = useState(false)
+  // Trava sincrona contra duplo-disparo: setPlacing e assincrono, entao dois
+  // cliques rapidos veem placing=false e abrem 2 trades. O ref barra na hora.
+  const placingRef = useRef(false)
   const [tradeError, setTradeError] = useState('')
   const [tradeResult, setTradeResult] = useState<{ direction: 'CALL' | 'PUT'; amount: number; profit: number; won: boolean } | null>(null)
 
@@ -552,11 +555,13 @@ export const TradingPanel = forwardRef<TradingPanelHandle, TradingPanelProps>(fu
 
   async function placeTrade(direction: 'CALL' | 'PUT') {
     if (!accountId) return
+    if (placingRef.current) return  // ja tem uma abertura em andamento — ignora clique repetido
     const entryPrice = livePriceRef.current
     if (entryPrice == null) {
       setTradeError('Aguarde o gráfico carregar o preço.')
       return
     }
+    placingRef.current = true
     setTradeError('')
     setPlacing(true)
     try {
@@ -635,6 +640,7 @@ export const TradingPanel = forwardRef<TradingPanelHandle, TradingPanelProps>(fu
     } catch {
       setTradeError('Erro ao abrir operação.')
     } finally {
+      placingRef.current = false
       setPlacing(false)
     }
   }

@@ -107,76 +107,78 @@ export async function createOperation(userId: string, input: CreateOperationInpu
   const authority = resolveAuthority(input.assetId, input.assetSymbol)
   if (authority.kind === 'NONE') throw new Error('ASSET_NOT_TRADEABLE')
 
-  // Forex (live) bloqueado no lancamento: so disponivel em DEMO e com feed ligado.
-  // Mercado real de forex entra depois com feed/quota adequados.
+  // Forex (live) so disponivel quando o feed esta ligado; e mesmo assim apenas em
+  // conta DEMO (o bloqueio de conta REAL e feito no statement abaixo).
   const forexEnabled = process.env.FOREX_FEED_ENABLED === 'true'
+  if (authority.kind === 'FOREX' && !forexEnabled) throw new Error('FOREX_NOT_AVAILABLE')
 
-  // Preco de ENTRADA vem do servidor. Valida o que o cliente viu contra o preco
-  // autoritativo; se divergiu demais, rejeita (cotacao velha). Sempre grava o do servidor.
+  // Preco de ENTRADA vem do servidor (Redis). Valida o que o cliente viu contra o
+  // preco autoritativo; se divergiu demais, rejeita (cotacao velha). Grava o do servidor.
   const serverPrice = await readPrice(authority.priceKey)
   if (serverPrice == null) throw new Error('PRICE_UNAVAILABLE')
   const drift = Math.abs(input.entryPrice - serverPrice) / serverPrice
   if (drift > authority.tolerance) throw new Error('PRICE_DIVERGED')
 
-  const entryPrice = serverPrice
-  // Payout vem do SERVIDOR (catalogo/OTC), nunca do cliente.
-  const payout = authority.payout
-  const expiresAt = new Date(Date.now() + input.expiresInSeconds * 1000)
+  const entryPrice  = serverPrice
+  const payout      = authority.payout         // payout do SERVIDOR, nunca do cliente
+  const isForex     = authority.kind === 'FOREX'
+  const expiresAt   = new Date(Date.now() + input.expiresInSeconds * 1000)
+  const description = `Operacao aberta: ${input.assetSymbol} ${input.direction}`
 
-  // Transacao interativa com lock de linha (SELECT ... FOR UPDATE) para evitar
-  // corrida de saldo: duas aberturas concorrentes nao podem ambas passar a checagem
-  // e deixar o saldo negativo.
-  const operation = await prisma.$transaction(async (tx) => {
-    const rows = await tx.$queryRaw<Array<{ user_id: string; type: string; balance: string }>>(Prisma.sql`
-      SELECT user_id, type, balance::text AS balance
-      FROM accounts WHERE id = ${input.accountId}::uuid
+  // Abertura atomica em UM unico statement (CTE de escrita). Evita a latencia de
+  // varias idas ao banco — a VPS (SFO) fala com o Postgres (sa-east-1, ~180ms por
+  // ida), entao transacao interativa multiplicava o tempo. O SELECT ... FOR UPDATE
+  // serializa aberturas concorrentes na mesma conta (sem race de saldo). Inserts/
+  // updates so ocorrem se todas as checagens passarem; senao nada e gravado.
+  const rows = await prisma.$queryRaw<Array<{
+    found: boolean; balance_ok: boolean; forex_ok: boolean; operation_id: string | null
+  }>>(Prisma.sql`
+    WITH acct AS (
+      SELECT id, balance, type FROM accounts
+      WHERE id = ${input.accountId}::uuid AND user_id = ${userId}::uuid
       FOR UPDATE
-    `)
-    const acc = rows[0]
-    if (!acc || acc.user_id !== userId) throw new Error('ACCOUNT_NOT_FOUND')
+    ),
+    checks AS (
+      SELECT
+        (SELECT count(*) FROM acct) = 1 AS found,
+        COALESCE((SELECT balance FROM acct) >= ${input.amount}::numeric, false) AS balance_ok,
+        COALESCE(NOT (${isForex}::boolean AND (SELECT type FROM acct) = 'REAL'), false) AS forex_ok
+    ),
+    ok AS ( SELECT (found AND balance_ok AND forex_ok) AS go FROM checks ),
+    ins AS (
+      INSERT INTO operations
+        (account_id, asset_id, asset_symbol, direction, amount, payout_pct, entry_price, entry_price_source, expires_at, status)
+      SELECT ${input.accountId}::uuid, ${input.assetId}, ${input.assetSymbol}, ${input.direction},
+             ${input.amount}::numeric, ${payout}::numeric, ${entryPrice}::numeric, 'SERVER'::price_source,
+             ${expiresAt}::timestamptz, 'OPEN'
+      WHERE (SELECT go FROM ok)
+      RETURNING id
+    ),
+    deb AS (
+      UPDATE accounts SET balance = balance - ${input.amount}::numeric
+      WHERE id = ${input.accountId}::uuid AND (SELECT go FROM ok)
+      RETURNING id
+    ),
+    txn AS (
+      INSERT INTO transactions (account_id, type, amount, description, operation_id)
+      SELECT ${input.accountId}::uuid, 'TRADE_LOSS', ${-input.amount}::numeric, ${description}, (SELECT id FROM ins)
+      WHERE (SELECT go FROM ok)
+      RETURNING id
+    )
+    SELECT (SELECT found FROM checks)      AS found,
+           (SELECT balance_ok FROM checks) AS balance_ok,
+           (SELECT forex_ok FROM checks)   AS forex_ok,
+           (SELECT id FROM ins)            AS operation_id
+  `)
 
-    if (authority.kind === 'FOREX' && (!forexEnabled || acc.type === 'REAL')) {
-      throw new Error('FOREX_NOT_AVAILABLE')
-    }
+  const r = rows[0]
+  if (!r || !r.found)  throw new Error('ACCOUNT_NOT_FOUND')
+  if (!r.forex_ok)     throw new Error('FOREX_NOT_AVAILABLE')
+  if (!r.balance_ok)   throw new Error('INSUFFICIENT_BALANCE')
+  if (!r.operation_id) throw new Error('ACCOUNT_NOT_FOUND')
 
-    const amount  = new Prisma.Decimal(input.amount)
-    const balance = new Prisma.Decimal(acc.balance)
-    if (balance.lessThan(amount)) throw new Error('INSUFFICIENT_BALANCE')
-
-    const op = await tx.operation.create({
-      data: {
-        accountId:        input.accountId,
-        assetId:          input.assetId,
-        assetSymbol:      input.assetSymbol,
-        direction:        input.direction,
-        amount,
-        payoutPct:        new Prisma.Decimal(payout),
-        entryPrice:       new Prisma.Decimal(entryPrice),
-        entryPriceSource: PriceSource.SERVER,
-        expiresAt,
-      },
-    })
-
-    await tx.account.update({
-      where: { id: input.accountId },
-      data:  { balance: { decrement: amount } },
-    })
-
-    await tx.transaction.create({
-      data: {
-        accountId:   input.accountId,
-        type:        'TRADE_LOSS',
-        amount:      amount.negated(),
-        description: `Operacao aberta: ${input.assetSymbol} ${input.direction}`,
-        operationId: op.id,
-      },
-    })
-
-    return op
-  })
-
-  scheduleExpiry(operation.id, input.expiresInSeconds)
-  return operation
+  scheduleExpiry(r.operation_id, input.expiresInSeconds)
+  return { id: r.operation_id }
 }
 
 // Liquida uma operacao OPEN: le exitPrice autoritativo do servidor, calcula
