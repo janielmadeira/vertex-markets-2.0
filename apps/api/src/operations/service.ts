@@ -1,81 +1,53 @@
 import { createHash } from 'node:crypto'
 import { prisma } from '../prisma.js'
 import { redis, KEYS } from '../redis.js'
-import { Prisma, PriceSource } from '@prisma/client'
-import { getLiveAsset } from '../market-data/catalog.js'
+import { PriceSource } from '@prisma/client'
 import type { CreateOperationInput } from './schema.js'
 
 // Tolerancia maxima entre entryPrice enviado pelo cliente e preco atual do servidor.
-// Por tipo de ativo: cripto se move mais rapido, tolera drift um pouco maior.
-const ENTRY_PRICE_TOLERANCE: Record<'OTC' | 'CRYPTO' | 'FOREX', number> = {
-  OTC:    0.002,
-  CRYPTO: 0.005,
-  FOREX:  0.002,
-}
+const ENTRY_PRICE_TOLERANCE = 0.002
 
-// Cache dos ativos OTC server-authoritative (symbol -> payout/decimals), alimentado
-// do banco. Refresh a cada 30s pega ativos adicionados/desativados via admin sem deploy.
+// Set de simbolos OTC server-authoritative, alimentado dinamicamente do banco.
+// Refresh a cada 30s pega ativos adicionados/desativados via admin sem precisar deploy.
 // Se o banco estiver indisponivel no startup, fica vazio ate o proximo refresh dar certo.
-let otcAssets = new Map<string, { payout: number; decimals: number }>()
+let serverAuthSymbols = new Set<string>()
 let lastRefreshAt = 0
 const REFRESH_INTERVAL_MS = 30_000
 
-async function refreshOtcAssets() {
+async function refreshServerAuthSymbols() {
   try {
     const rows = await prisma.otcAsset.findMany({
       where:  { status: 'ACTIVE' },
-      select: { symbol: true, payout: true, decimals: true },
+      select: { symbol: true },
     })
-    otcAssets = new Map(rows.map(r => [r.symbol, { payout: r.payout, decimals: r.decimals }]))
+    serverAuthSymbols = new Set(rows.map(r => r.symbol))
     lastRefreshAt = Date.now()
   } catch (err: any) {
-    console.error('[operations] refreshOtcAssets failed:', err.message)
+    console.error('[operations] refreshServerAuthSymbols failed:', err.message)
   }
 }
 
+// Refresh lazy: se passou o intervalo, recarrega antes de validar.
+// Evita setInterval orfao em testes/scripts que importam o modulo sem subir o app.
 async function ensureFreshSymbols() {
-  if (Date.now() - lastRefreshAt > REFRESH_INTERVAL_MS) await refreshOtcAssets()
+  if (Date.now() - lastRefreshAt > REFRESH_INTERVAL_MS) await refreshServerAuthSymbols()
 }
 
-// Deriva o symbol OTC canonico a partir do assetId do front (ex: 'eur-usd-otc' -> 'EURUSD-OTC').
-function otcSymbolFromAssetId(assetId: string): string | null {
-  const id = assetId.toLowerCase()
-  if (!id.endsWith('-otc')) return null
-  return id.slice(0, -4).replace(/[-\s]/g, '').toUpperCase() + '-OTC'
+function isServerAuthoritative(assetSymbol: string): boolean {
+  if (serverAuthSymbols.has(assetSymbol)) return true
+  const canonical = assetSymbol.replace(/[\/\-\s]/g, '').toUpperCase() + '-OTC'
+  return serverAuthSymbols.has(canonical)
 }
 
-// Fallback legado: deriva symbol OTC a partir do assetSymbol (ex: 'EUR/USD' -> 'EURUSD-OTC').
-function otcSymbolFromAssetSymbol(assetSymbol: string): string {
-  if (otcAssets.has(assetSymbol)) return assetSymbol
+function canonicalSymbol(assetSymbol: string): string {
+  if (serverAuthSymbols.has(assetSymbol)) return assetSymbol
   return assetSymbol.replace(/[\/\-\s]/g, '').toUpperCase() + '-OTC'
 }
 
-type Authority =
-  | { kind: 'OTC' | 'CRYPTO' | 'FOREX'; priceKey: string; payout: number; tolerance: number }
-  | { kind: 'NONE' }
-
-// Resolve a autoridade de preco de um ativo: OTC (engine proprio), CRYPTO/FOREX
-// (feed live), ou NONE (nao server-authoritative — nao deve operar). O preco vem
-// SEMPRE do servidor (Redis), nunca do cliente.
-function resolveAuthority(assetId: string, assetSymbol: string): Authority {
-  // 1) Ativos LIVE (cripto/forex) por assetId
-  const live = getLiveAsset(assetId)
-  if (live) {
-    const key = live.feedSymbol.replace(/[\/\-\s]/g, '').toUpperCase()
-    return { kind: live.kind, priceKey: KEYS.livePrice(key), payout: live.payout, tolerance: ENTRY_PRICE_TOLERANCE[live.kind] }
-  }
-  // 2) OTC por assetId, com fallback pelo assetSymbol
-  const otcSym = otcSymbolFromAssetId(assetId) ?? otcSymbolFromAssetSymbol(assetSymbol)
-  const otc = otcAssets.get(otcSym)
-  if (otc) {
-    return { kind: 'OTC', priceKey: KEYS.price(otcSym), payout: otc.payout, tolerance: ENTRY_PRICE_TOLERANCE.OTC }
-  }
-  return { kind: 'NONE' }
-}
-
-async function readPrice(priceKey: string): Promise<number | null> {
-  const cached = await redis.get(priceKey)
-  return cached != null ? Number(cached) : null
+async function readServerPrice(assetSymbol: string): Promise<number | null> {
+  const symbol = canonicalSymbol(assetSymbol)
+  const cached = await redis.get(KEYS.price(symbol))
+  return cached ? Number(cached) : null
 }
 
 function computeAuditHash(parts: {
@@ -85,7 +57,7 @@ function computeAuditHash(parts: {
   openedAt:    Date
   closedAt:    Date
   direction:   string
-  amount:      string
+  amount:      number
   payout:      number
 }): string {
   const payload = [
@@ -95,7 +67,7 @@ function computeAuditHash(parts: {
     parts.openedAt.toISOString(),
     parts.closedAt.toISOString(),
     parts.direction,
-    parts.amount,
+    parts.amount.toFixed(2),
     String(parts.payout),
   ].join('|')
   return createHash('sha256').update(payload).digest('hex')
@@ -104,145 +76,111 @@ function computeAuditHash(parts: {
 export async function createOperation(userId: string, input: CreateOperationInput) {
   await ensureFreshSymbols()
 
-  const authority = resolveAuthority(input.assetId, input.assetSymbol)
-  if (authority.kind === 'NONE') throw new Error('ASSET_NOT_TRADEABLE')
+  const account = await prisma.account.findUnique({ where: { id: input.accountId } })
+  if (!account || account.userId !== userId) throw new Error('ACCOUNT_NOT_FOUND')
 
-  // Forex (live) so disponivel quando o feed esta ligado; e mesmo assim apenas em
-  // conta DEMO (o bloqueio de conta REAL e feito no statement abaixo).
-  const forexEnabled = process.env.FOREX_FEED_ENABLED === 'true'
-  if (authority.kind === 'FOREX' && !forexEnabled) throw new Error('FOREX_NOT_AVAILABLE')
+  const balance = Number(account.balance)
+  if (balance < input.amount) throw new Error('INSUFFICIENT_BALANCE')
 
-  // Preco de ENTRADA vem do servidor (Redis). Valida o que o cliente viu contra o
-  // preco autoritativo; se divergiu demais, rejeita (cotacao velha). Grava o do servidor.
-  const serverPrice = await readPrice(authority.priceKey)
-  if (serverPrice == null) throw new Error('PRICE_UNAVAILABLE')
-  const drift = Math.abs(input.entryPrice - serverPrice) / serverPrice
-  if (drift > authority.tolerance) throw new Error('PRICE_DIVERGED')
+  let entryPrice       = input.entryPrice
+  let entryPriceSource: PriceSource = PriceSource.CLIENT
 
-  const entryPrice  = serverPrice
-  const payout      = authority.payout         // payout do SERVIDOR, nunca do cliente
-  const isForex     = authority.kind === 'FOREX'
-  const expiresAt   = new Date(Date.now() + input.expiresInSeconds * 1000)
-  const description = `Operacao aberta: ${input.assetSymbol} ${input.direction}`
+  if (isServerAuthoritative(input.assetSymbol)) {
+    const serverPrice = await readServerPrice(input.assetSymbol)
+    if (serverPrice == null) throw new Error('PRICE_UNAVAILABLE')
+    const drift = Math.abs(input.entryPrice - serverPrice) / serverPrice
+    if (drift > ENTRY_PRICE_TOLERANCE) throw new Error('PRICE_DIVERGED')
+    entryPrice       = serverPrice
+    entryPriceSource = PriceSource.SERVER
+  }
 
-  // Abertura atomica em UM unico statement (CTE de escrita). Evita a latencia de
-  // varias idas ao banco — a VPS (SFO) fala com o Postgres (sa-east-1, ~180ms por
-  // ida), entao transacao interativa multiplicava o tempo. O SELECT ... FOR UPDATE
-  // serializa aberturas concorrentes na mesma conta (sem race de saldo). Inserts/
-  // updates so ocorrem se todas as checagens passarem; senao nada e gravado.
-  const rows = await prisma.$queryRaw<Array<{
-    found: boolean; balance_ok: boolean; forex_ok: boolean; operation_id: string | null
-  }>>(Prisma.sql`
-    WITH acct AS (
-      SELECT id, balance, type FROM accounts
-      WHERE id = ${input.accountId}::uuid AND user_id = ${userId}::uuid
-      FOR UPDATE
-    ),
-    checks AS (
-      SELECT
-        (SELECT count(*) FROM acct) = 1 AS found,
-        COALESCE((SELECT balance FROM acct) >= ${input.amount}::numeric, false) AS balance_ok,
-        COALESCE(NOT (${isForex}::boolean AND (SELECT type FROM acct) = 'REAL'), false) AS forex_ok
-    ),
-    ok AS ( SELECT (found AND balance_ok AND forex_ok) AS go FROM checks ),
-    ins AS (
-      INSERT INTO operations
-        (account_id, asset_id, asset_symbol, direction, amount, payout_pct, entry_price, entry_price_source, expires_at, status)
-      SELECT ${input.accountId}::uuid, ${input.assetId}, ${input.assetSymbol}, ${input.direction},
-             ${input.amount}::numeric, ${payout}::numeric, ${entryPrice}::numeric, 'SERVER'::price_source,
-             ${expiresAt}::timestamptz, 'OPEN'
-      WHERE (SELECT go FROM ok)
-      RETURNING id
-    ),
-    deb AS (
-      UPDATE accounts SET balance = balance - ${input.amount}::numeric
-      WHERE id = ${input.accountId}::uuid AND (SELECT go FROM ok)
-      RETURNING id
-    ),
-    txn AS (
-      INSERT INTO transactions (account_id, type, amount, description, operation_id)
-      SELECT ${input.accountId}::uuid, 'TRADE_LOSS', ${-input.amount}::numeric, ${description}, (SELECT id FROM ins)
-      WHERE (SELECT go FROM ok)
-      RETURNING id
-    )
-    SELECT (SELECT found FROM checks)      AS found,
-           (SELECT balance_ok FROM checks) AS balance_ok,
-           (SELECT forex_ok FROM checks)   AS forex_ok,
-           (SELECT id FROM ins)            AS operation_id
-  `)
+  const expiresAt = new Date(Date.now() + input.expiresInSeconds * 1000)
 
-  const r = rows[0]
-  if (!r || !r.found)  throw new Error('ACCOUNT_NOT_FOUND')
-  if (!r.forex_ok)     throw new Error('FOREX_NOT_AVAILABLE')
-  if (!r.balance_ok)   throw new Error('INSUFFICIENT_BALANCE')
-  if (!r.operation_id) throw new Error('ACCOUNT_NOT_FOUND')
+  const [operation] = await prisma.$transaction([
+    prisma.operation.create({
+      data: {
+        accountId:   input.accountId,
+        assetId:     input.assetId,
+        assetSymbol: input.assetSymbol,
+        direction:   input.direction,
+        amount:      input.amount,
+        payoutPct:   input.payout,
+        entryPrice,
+        entryPriceSource,
+        expiresAt,
+      },
+    }),
+    prisma.account.update({
+      where: { id: input.accountId },
+      data:  { balance: { decrement: input.amount } },
+    }),
+    prisma.transaction.create({
+      data: {
+        accountId:   input.accountId,
+        type:        'TRADE_LOSS',
+        amount:      -input.amount,
+        description: `Operacao aberta: ${input.assetSymbol} ${input.direction}`,
+      },
+    }),
+  ])
 
-  scheduleExpiry(r.operation_id, input.expiresInSeconds)
-  return { id: r.operation_id }
+  scheduleExpiry(operation.id, input.expiresInSeconds)
+
+  return operation
 }
 
-// Liquida uma operacao OPEN: le exitPrice autoritativo do servidor, calcula
-// resultado, credita conta. Idempotente (no-op se nao for OPEN).
+// Liquida uma operacao OPEN: calcula exitPrice, atualiza status, credita conta se ganhou.
+// Idempotente: se nao for OPEN (ja liquidada ou inexistente), retorna sem fazer nada.
 //
-// SERVER-AUTHORITATIVE PARA TODOS OS TIPOS (OTC + CRYPTO + FOREX). O preco de
-// saida vem SEMPRE do Redis (feed do servidor), nunca do cliente.
+// APENAS PARA PARES OTC (server-authoritative). Pares LIVE (forex/cripto com feed
+// real via Twelve Data/Binance) sao liquidados pelo CLIENTE via supabase.rpc
+// 'settle_trade' com o preco exato visto no chart. Backend nao tem fonte autoritativa
+// de exit price pra esses (so o cliente vê o feed real em tempo real). O sweeper
+// trata o caso edge em que o cliente nao liquida (timeout > grace period).
 //
-// Se nao houver preco no Redis (feed fora do ar): NAO liquida como WIN/LOSS
-// (seria injusto). Por padrao deixa OPEN para o sweeper tentar de novo. O sweeper
-// chama com drawIfNoPrice=true apos um grace, ai liquida como DRAW (refund).
-export async function settleOperation(
-  operationId: string,
-  opts: { drawIfNoPrice?: boolean } = {},
-): Promise<void> {
+// Eh chamada tanto pelo setTimeout (caminho feliz) quanto pelo sweeper (caminho de
+// recuperacao apos restart do container, que perde os setTimeout em memoria).
+export async function settleOperation(operationId: string): Promise<void> {
   await ensureFreshSymbols()
 
   const op = await prisma.operation.findUnique({ where: { id: operationId } })
   if (!op || op.status !== 'OPEN') return
 
-  const authority = resolveAuthority(op.assetId, op.assetSymbol)
-  if (authority.kind === 'NONE') {
-    // Ativo desconhecido/desativado: nao ha como liquidar com justica. Refund.
-    await settleAsDraw(operationId, 'Ativo indisponivel para liquidacao - valor devolvido')
-    return
-  }
+  const assetSymbol = op.assetSymbol
+
+  // Non-OTC: nao auto-liquida. Cliente eh responsavel via supabase.rpc('settle_trade').
+  // Se cliente nao liquidar, sweeper trata depois do grace period (DRAW = refund).
+  if (!isServerAuthoritative(assetSymbol)) return
 
   const entryPrice = Number(op.entryPrice)
-  const exitFromServer = await readPrice(authority.priceKey)
+  const amount     = Number(op.amount)
+  const payout     = Number(op.payoutPct)
+  const direction  = op.direction
 
-  if (exitFromServer == null) {
-    if (opts.drawIfNoPrice) {
-      await settleAsDraw(operationId, 'Preco indisponivel na expiracao - valor devolvido')
-    }
-    // senao: deixa OPEN; sweeper tenta de novo no proximo tick.
-    return
+  // OTC: pega preco autoritativo do Redis. Se Redis estiver fora, faz fallback
+  // pequeno (random walk pequeno em torno do entry) — eh raro e auditavel.
+  const serverPrice = await readServerPrice(assetSymbol)
+  let exitPrice: number
+  let exitPriceSource: PriceSource
+
+  if (serverPrice == null) {
+    const change = (Math.random() * 0.01) - 0.005
+    exitPrice       = parseFloat((entryPrice * (1 + change)).toFixed(5))
+    exitPriceSource = PriceSource.FALLBACK
+  } else {
+    exitPrice       = serverPrice
+    exitPriceSource = PriceSource.SERVER
   }
 
-  const exitPrice = exitFromServer
-  const direction = op.direction
-  const amount    = new Prisma.Decimal(op.amount)
-  const payout    = new Prisma.Decimal(op.payoutPct)
-
-  let status: 'WON' | 'LOST' | 'DRAW'
-  if (exitPrice === entryPrice) {
-    status = 'DRAW'
-  } else if (
+  const won =
     (direction === 'CALL' && exitPrice > entryPrice) ||
     (direction === 'PUT'  && exitPrice < entryPrice)
-  ) {
-    status = 'WON'
-  } else {
-    status = 'LOST'
-  }
 
-  const profit = status === 'WON'
-    ? amount.mul(payout).div(100).toDecimalPlaces(2)
-    : new Prisma.Decimal(0)
+  const profit   = won ? parseFloat((amount * (payout / 100)).toFixed(2)) : 0
   const closedAt = new Date()
 
   const auditHash = computeAuditHash({
-    operationId, entryPrice, exitPrice, direction,
-    amount:  amount.toFixed(2),
-    payout:  payout.toNumber(),
+    operationId, entryPrice, exitPrice, direction, amount, payout,
     openedAt: op.createdAt, closedAt,
   })
 
@@ -250,73 +188,50 @@ export async function settleOperation(
     prisma.operation.update({
       where: { id: operationId },
       data: {
-        status,
-        exitPrice:       new Prisma.Decimal(exitPrice),
-        exitPriceSource: PriceSource.SERVER,
+        status:    won ? 'WON' : 'LOST',
+        exitPrice,
+        exitPriceSource,
         auditHash,
-        profit:          status === 'WON' ? profit : new Prisma.Decimal(0),
+        profit,
         closedAt,
       },
     }),
-    ...(status === 'WON'
+    ...(won
       ? [
           prisma.account.update({
             where: { id: op.accountId },
-            data:  { balance: { increment: amount.plus(profit) } },
+            data:  { balance: { increment: amount + profit } },
           }),
           prisma.transaction.create({
             data: {
               accountId:   op.accountId,
               type:        'TRADE_WIN',
-              amount:      amount.plus(profit),
+              amount:      amount + profit,
               description: `Operacao encerrada: ganho de R$${profit.toFixed(2)}`,
               operationId,
             },
           }),
         ]
-      : status === 'DRAW'
-        ? [
-            prisma.account.update({
-              where: { id: op.accountId },
-              data:  { balance: { increment: amount } },
-            }),
-            prisma.transaction.create({
-              data: {
-                accountId:   op.accountId,
-                type:        'TRADE_DRAW',
-                amount,
-                description: `Operacao empatada: valor devolvido`,
-                operationId,
-              },
-            }),
-          ]
-        : [
-            prisma.transaction.create({
-              data: {
-                accountId:   op.accountId,
-                type:        'TRADE_LOSS',
-                amount:      new Prisma.Decimal(0),
-                description: `Operacao perdida`,
-                operationId,
-              },
-            }),
-          ]),
+      : []),
   ])
 }
 
-// Liquida como DRAW (devolve a entrada integral). Usado quando nao ha preco
-// autoritativo para decidir o resultado com justica.
-async function settleAsDraw(operationId: string, reason: string): Promise<void> {
+// Liquida uma operacao non-OTC orfa como DRAW (devolve o valor da entrada).
+// Usado pelo sweeper quando o cliente nao liquidou apos grace period (provavelmente
+// fechou o navegador). DRAW eh mais justo que LOSS pra essa situacao: o sistema
+// nao tem como saber qual era o preco no momento exato da expiracao.
+async function settleOrphanAsDraw(operationId: string): Promise<void> {
   const op = await prisma.operation.findUnique({ where: { id: operationId } })
   if (!op || op.status !== 'OPEN') return
 
-  const amount     = new Prisma.Decimal(op.amount)
+  const amount     = Number(op.amount)
   const entryPrice = Number(op.entryPrice)
   const closedAt   = new Date()
 
+  // Audit hash mesmo pra DRAW: documenta que a settlement foi automatica/expirada.
   const auditHash = computeAuditHash({
     operationId, entryPrice, exitPrice: entryPrice, direction: op.direction,
-    amount: amount.toFixed(2), payout: Number(op.payoutPct),
+    amount, payout: Number(op.payoutPct),
     openedAt: op.createdAt, closedAt,
   })
 
@@ -325,79 +240,27 @@ async function settleAsDraw(operationId: string, reason: string): Promise<void> 
       where: { id: operationId },
       data: {
         status:          'DRAW',
-        exitPrice:       new Prisma.Decimal(entryPrice),
+        exitPrice:       entryPrice,  // sem info, marca = entry (movimento zero)
         exitPriceSource: PriceSource.FALLBACK,
         auditHash,
-        profit:          new Prisma.Decimal(0),
+        profit:          0,
         closedAt,
       },
     }),
     prisma.account.update({
       where: { id: op.accountId },
-      data:  { balance: { increment: amount } },
+      data:  { balance: { increment: amount } },  // refund integral
     }),
     prisma.transaction.create({
       data: {
         accountId:   op.accountId,
         type:        'TRADE_DRAW',
         amount,
-        description: reason,
+        description: `Operacao expirada sem liquidacao (cliente offline) - valor devolvido`,
         operationId,
       },
     }),
   ])
-}
-
-// Fecha uma operacao antecipadamente. O reembolso e calculado pelo SERVIDOR
-// (proporcional ao tempo decorrido), nunca enviado pelo cliente. Quanto mais
-// cedo fecha, mais devolve; perto da expiracao, devolve menos.
-export async function earlyClose(userId: string, operationId: string) {
-  const op = await prisma.operation.findUnique({
-    where:   { id: operationId },
-    include: { account: { select: { userId: true } } },
-  })
-  if (!op || op.account.userId !== userId) throw new Error('NOT_FOUND')
-  if (op.status !== 'OPEN') throw new Error('NOT_OPEN')
-
-  const amount   = new Prisma.Decimal(op.amount)
-  const now      = Date.now()
-  const openedMs = op.createdAt.getTime()
-  const expireMs = op.expiresAt.getTime()
-  const total    = Math.max(1, expireMs - openedMs)
-  const elapsed  = Math.min(Math.max(0, now - openedMs), total)
-
-  // Reembolso linear: 90% no inicio decaindo ate 10% perto da expiracao.
-  const factor   = 0.9 - 0.8 * (elapsed / total)
-  const refund   = amount.mul(new Prisma.Decimal(factor)).toDecimalPlaces(2)
-  const loss     = amount.minus(refund)
-  const closedAt = new Date()
-
-  await prisma.$transaction([
-    prisma.operation.update({
-      where: { id: operationId },
-      data: {
-        status:    'LOST',
-        exitPrice: op.entryPrice,
-        profit:    loss.negated(),
-        closedAt,
-      },
-    }),
-    prisma.account.update({
-      where: { id: op.accountId },
-      data:  { balance: { increment: refund } },
-    }),
-    prisma.transaction.create({
-      data: {
-        accountId:   op.accountId,
-        type:        'EARLY_CLOSE',
-        amount:      refund,
-        description: `Saida antecipada: devolvido R$${refund.toFixed(2)}`,
-        operationId,
-      },
-    }),
-  ])
-
-  return { refund: refund.toNumber() }
 }
 
 function scheduleExpiry(operationId: string, expiresInSeconds: number) {
@@ -409,14 +272,15 @@ function scheduleExpiry(operationId: string, expiresInSeconds: number) {
 }
 
 // Sweeper: roda periodicamente buscando operacoes OPEN cuja expires_at ja passou.
-// Garante que operacoes nao ficam orfas se o container reiniciar (perdendo os
-// setTimeout em memoria) ou se o feed estava fora no instante da expiracao.
-// Idempotente — settleOperation eh no-op se a operacao ja nao estiver OPEN.
+// Garante que operacoes nao ficam orfas se o container reiniciar (perdendo
+// os setTimeout em memoria). Tambem cobre janela em que o setTimeout falha
+// silenciosamente por qualquer motivo. Idempotente — settleOperation eh no-op
+// se a operacao ja nao estiver OPEN.
 let sweeperTimer: NodeJS.Timeout | null = null
 
-// Apos esse tempo sem conseguir preco autoritativo, o sweeper liquida como DRAW
-// (refund) em vez de deixar a operacao presa OPEN para sempre.
-const NO_PRICE_GRACE_MS = 60 * 1000
+// Grace period antes do sweeper liquidar uma operacao non-OTC orfa como DRAW.
+// Da tempo do cliente liquidar via supabase.rpc apos um F5 / reconexao.
+const NON_OTC_ORPHAN_GRACE_MS = 2 * 60 * 1000  // 2 minutos
 
 export function startOrphanSweeper(intervalMs = 30_000): void {
   if (sweeperTimer) return
@@ -424,38 +288,53 @@ export function startOrphanSweeper(intervalMs = 30_000): void {
 
   const tick = async () => {
     try {
-      await ensureFreshSymbols()
+      await ensureFreshSymbols()  // precisa pra classificar OTC vs non-OTC corretamente
 
       const now = new Date()
       const orphans = await prisma.operation.findMany({
         where:  { status: 'OPEN', expiresAt: { lte: now } },
-        select: { id: true, expiresAt: true },
-        take:   100,
+        select: { id: true, assetSymbol: true, expiresAt: true },
+        take:   100,  // limite de seguranca por iteracao
       })
       if (orphans.length === 0) return
 
-      let settled = 0
-      let drawn   = 0
+      let otcSettled = 0
+      let drawRefunded = 0
+      let waitingGrace = 0
+
       for (const op of orphans) {
-        const expiredForMs = now.getTime() - op.expiresAt.getTime()
-        const drawIfNoPrice = expiredForMs >= NO_PRICE_GRACE_MS
-        const before = drawIfNoPrice
-        await settleOperation(op.id, { drawIfNoPrice }).catch(err =>
-          console.error('[operations] sweep settle failed:', op.id, err?.message ?? err)
-        )
-        if (before) drawn++; else settled++
+        if (isServerAuthoritative(op.assetSymbol)) {
+          // OTC: liquida normalmente com serverPrice do Redis
+          await settleOperation(op.id).catch(err =>
+            console.error('[operations] sweep OTC settle failed:', op.id, err?.message ?? err)
+          )
+          otcSettled++
+        } else {
+          // Non-OTC: cliente eh quem liquida. Da grace period antes de refund.
+          const expiredForMs = now.getTime() - op.expiresAt.getTime()
+          if (expiredForMs >= NON_OTC_ORPHAN_GRACE_MS) {
+            await settleOrphanAsDraw(op.id).catch(err =>
+              console.error('[operations] sweep DRAW failed:', op.id, err?.message ?? err)
+            )
+            drawRefunded++
+          } else {
+            waitingGrace++
+          }
+        }
       }
 
       const parts: string[] = []
-      if (settled) parts.push(`${settled} tentadas`)
-      if (drawn)   parts.push(`${drawn} com grace (draw se sem preco)`)
-      if (parts.length) console.log(`[operations] sweep: ${parts.join(', ')}`)
+      if (otcSettled)    parts.push(`${otcSettled} OTC settled`)
+      if (drawRefunded)  parts.push(`${drawRefunded} non-OTC refunded as DRAW`)
+      if (waitingGrace)  parts.push(`${waitingGrace} non-OTC waiting grace`)
+      if (parts.length)  console.log(`[operations] sweep: ${parts.join(', ')}`)
     } catch (err: any) {
       console.error('[operations] sweep error:', err?.message ?? err)
     }
   }
 
   sweeperTimer = setInterval(tick, intervalMs)
+  // Roda uma vez no startup pra limpar backlog acumulado.
   tick()
 
   const stop = () => { if (sweeperTimer) clearInterval(sweeperTimer); sweeperTimer = null }
