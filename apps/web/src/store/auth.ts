@@ -1,6 +1,12 @@
 import { create } from 'zustand'
 import { supabase } from '@/lib/supabase'
 
+// Garante que o listener de auth + canal Realtime sejam registrados UMA vez so.
+// Em dev (Next/React StrictMode) e em HMR o init() roda mais de uma vez; sem essa
+// trava, o segundo .channel('account-balance').on(...) estoura
+// "cannot add postgres_changes callbacks after subscribe()".
+let realtimeInitialized = false
+
 export interface Account {
   id:       string
   type:     'DEMO' | 'REAL'
@@ -99,6 +105,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const accounts = await fetchAccounts(session.user.id)
     const user = await buildUser(session.user, accounts)
     set({ user, token: session.access_token, loading: false })
+
+    if (realtimeInitialized) return
+    realtimeInitialized = true
 
     // Mantém sessão sincronizada automaticamente
     supabase.auth.onAuthStateChange((_event, session) => {
