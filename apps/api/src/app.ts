@@ -9,6 +9,8 @@ import { accountRoutes } from './accounts/routes.js'
 import { otcAdminRoutes, otcPublicRoutes } from './market-data/otc/routes.js'
 import { otcWsRoutes } from './market-data/otc/ws-routes.js'
 import { auditRoutes } from './admin/audit.js'
+import { walletRoutes, walletAdminRoutes } from './wallet/routes.js'
+import { bspayWebhookRoutes } from './webhooks/bspay.js'
 import { prisma } from './prisma.js'
 
 export async function buildApp() {
@@ -87,6 +89,9 @@ export async function buildApp() {
   await app.register(otcPublicRoutes,  { prefix: '/market-data/otc' })
   await app.register(otcAdminRoutes,   { prefix: '/admin/otc' })
   await app.register(auditRoutes,      { prefix: '/admin/audit' })
+  await app.register(walletRoutes,      { prefix: '/wallet' })
+  await app.register(walletAdminRoutes, { prefix: '/admin/wallet' })
+  await app.register(bspayWebhookRoutes, { prefix: '/webhooks' })
   await app.register(otcWsRoutes,      { prefix: '/ws' })
 
   return app
