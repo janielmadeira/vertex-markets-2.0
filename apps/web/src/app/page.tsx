@@ -106,19 +106,44 @@ export default function TradingPage() {
   const realBalance = parseFloat(accounts.find(a => a.type === 'REAL')?.balance ?? '0')
   const balance     = isDemo ? demoBalance : realBalance
 
+  // Persiste as abas abertas + ativo selecionado no navegador, pra sobreviver ao F5.
+  function persistTabs(open: Asset[], selectedId: string) {
+    try {
+      localStorage.setItem('vertex.tabs', JSON.stringify({ openIds: open.map(a => a.id), selectedId }))
+    } catch { /* localStorage indisponivel — ignora */ }
+  }
+
+  // Restaura abas/ativo salvos ao montar (uma vez). Roda so no cliente.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('vertex.tabs')
+      if (!raw) return
+      const saved = JSON.parse(raw) as { openIds?: string[]; selectedId?: string }
+      const open = (saved.openIds ?? []).map(id => ASSETS.find(a => a.id === id)).filter(Boolean) as Asset[]
+      if (open.length === 0) return
+      setOpenAssets(open)
+      const sel = ASSETS.find(a => a.id === saved.selectedId)
+      setSelectedAsset(sel ?? open[open.length - 1])
+    } catch { /* json invalido — ignora */ }
+  }, [])
+
   function handleSelectAsset(asset: Asset) {
     setSelectedAsset(asset)
-    if (!openAssets.find((a) => a.id === asset.id)) {
-      setOpenAssets((prev) => [...prev, asset])
-    }
+    const nextOpen = openAssets.find((a) => a.id === asset.id) ? openAssets : [...openAssets, asset]
+    if (nextOpen !== openAssets) setOpenAssets(nextOpen)
+    persistTabs(nextOpen, asset.id)
   }
 
   function handleCloseAsset(asset: Asset) {
     const remaining = openAssets.filter((a) => a.id !== asset.id)
     setOpenAssets(remaining)
+    let selectedId = selectedAsset.id
     if (selectedAsset.id === asset.id && remaining.length > 0) {
-      setSelectedAsset(remaining[remaining.length - 1])
+      const next = remaining[remaining.length - 1]
+      setSelectedAsset(next)
+      selectedId = next.id
     }
+    persistTabs(remaining, selectedId)
   }
 
   function handleSelectDemo() {
