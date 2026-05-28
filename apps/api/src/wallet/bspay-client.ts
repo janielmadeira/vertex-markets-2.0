@@ -17,6 +17,10 @@ const SIGNING_KEY    = process.env.BSPAY_SIGNING_KEY    ?? ''  // assina cash-ou
 const WEBHOOK_SECRET = process.env.BSPAY_WEBHOOK_SECRET ?? ''  // valida webhooks
 const POSTBACK_URL   = process.env.BSPAY_POSTBACK_URL   ?? ''  // URL que recebe os webhooks
 
+// User-Agent fixo: o BSPay tem allowlist de User-Agent. Manter este valor
+// liberado no dashboard. (fetch do Node manda 'node' por padrao, nao previsivel.)
+const USER_AGENT = process.env.BSPAY_USER_AGENT ?? 'VertexMarkets/1.0'
+
 function assertConfigured() {
   if (!BASE_URL || !CLIENT_ID || !CLIENT_SECRET) throw new Error('BSPAY_NOT_CONFIGURED')
 }
@@ -31,7 +35,7 @@ async function getAccessToken(): Promise<string> {
   const basic = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64')
   const res = await fetch(`${BASE_URL}/v2/oauth/token`, {
     method:  'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${basic}` },
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${basic}`, 'User-Agent': USER_AGENT },
     body:    JSON.stringify({ grant_type: 'client_credentials' }),
   })
   if (!res.ok) throw new Error(`BSPAY_AUTH_FAILED_${res.status}`)
@@ -70,7 +74,7 @@ export async function createPixCharge(params: {
 
   const res = await fetch(`${BASE_URL}/v2/transactions/cashin`, {
     method:  'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`, 'User-Agent': USER_AGENT },
     body:    JSON.stringify(body),
   })
   if (!res.ok) throw new Error(`BSPAY_CHARGE_FAILED_${res.status}`)
@@ -122,6 +126,7 @@ export async function createPixPayout(params: {
     headers: {
       'Content-Type':  'application/json',
       'Authorization': `Bearer ${token}`,
+      'User-Agent':    USER_AGENT,
       'X-Signature':   signature,
       'X-Timestamp':   timestamp,
       'X-Nonce':       nonce,
