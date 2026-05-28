@@ -7,6 +7,7 @@ import { ASSETS, getOTCPrice, type Asset, type OpenTrade, type ActiveTrade } fro
 import { cn } from '@/lib/utils'
 import { FlagPair } from '@/components/ui/FlagPair'
 import { supabase } from '@/lib/supabase'
+import { api } from '@/lib/api'
 import { useAuthStore } from '@/store/auth'
 import { isMarketOpen, nextOpenAt, formatTimeUntil } from '@/lib/marketHours'
 
@@ -93,7 +94,7 @@ function TradeItem({ trade, shortLabels, currentPrice, onDoubleUp, onEarlyClose 
   shortLabels: boolean
   currentPrice?: number
   onDoubleUp: (trade: OpenTrade, remaining: number) => void
-  onEarlyClose: (trade: OpenTrade, refund: number) => void
+  onEarlyClose: (trade: OpenTrade) => void
 }) {
   const [remaining, setRemaining] = useState(() => Math.max(0, trade.expiryTime - Math.floor(Date.now() / 1000)))
   const [expanded, setExpanded] = useState(false)
@@ -111,9 +112,10 @@ function TradeItem({ trade, shortLabels, currentPrice, onDoubleUp, onEarlyClose 
   const s = (remaining % 60).toString().padStart(2, '0')
 
   const name = trade.asset.label.length > 13 ? trade.asset.label.slice(0, 13) + '...' : trade.asset.label
-  // Saída antecipada: 20% do valor quando há tempo restante, decrescendo até 0
+  // Saída antecipada: estimativa que espelha a fórmula do servidor
+  // (refund = amount * (0.9 - 0.8*tempo_decorrido)). O valor oficial vem do backend.
   const decay = trade.duration && trade.duration > 0 ? remaining / trade.duration : 1
-  const earlyExitValue = Math.max(1, Math.round(trade.amount * 0.20 * decay))
+  const earlyExitValue = Math.max(1, Math.round(trade.amount * (0.1 + 0.8 * decay) * 100) / 100)
   const canAct = remaining > 5 && !acting
 
   // P&L em tempo real
@@ -172,7 +174,7 @@ function TradeItem({ trade, shortLabels, currentPrice, onDoubleUp, onEarlyClose 
               e.stopPropagation()
               if (!canAct) return
               setActing(true)
-              await onEarlyClose(trade, earlyExitValue)
+              await onEarlyClose(trade)
               setActing(false)
             }}
             className="flex-1 h-7 rounded-lg bg-blue-600 hover:bg-blue-500 text-[11px] font-bold text-white transition-colors px-2 disabled:opacity-40"
@@ -222,60 +224,38 @@ export const TradingPanel = forwardRef<TradingPanelHandle, TradingPanelProps>(fu
     return () => clearTimeout(t)
   }, [tradeResult])
 
-  // Reconcilia o resultado mostrado no popup com o resultado oficial do banco.
-  // Trata o caso comum em que o backend api (service.ts setTimeout) ja liquidou
-  // a operacao antes do cliente chamar settle_trade — nesse caso a RPC retorna
-  // erro OPERATION_NOT_FOUND e precisamos buscar o status real direto da tabela.
-  // So atualiza o popup se tivermos certeza do resultado oficial e ele divergir.
+  // Resultado OFICIAL vem do backend (server-authoritative). O backend liquida a
+  // operacao no instante da expiracao usando o preco do servidor — o cliente NAO
+  // decide mais o resultado. Aqui buscamos esse resultado oficial (com pequenas
+  // tentativas, pois a liquidacao do servidor pode levar uma fracao de segundo) e
+  // corrigimos o popup otimista se divergir.
   async function reconcileWithBackend(
     operationId: string,
-    exitPrice:   number,
     direction:   'CALL' | 'PUT',
     investment:  number,
     localWon:    boolean,
     localProfit: number,
   ) {
-    let backendStatus: 'WON' | 'LOST' | 'DRAW' | null = null
-    let backendProfit = 0
-    try {
-      const { data: result, error } = await supabase.rpc('settle_trade', {
-        p_operation_id: operationId,
-        p_exit_price:   exitPrice,
-      })
-      if (error) {
-        // OPERATION_NOT_FOUND = backend ja liquidou antes; buscar resultado oficial.
-        if (String(error.message ?? '').includes('OPERATION_NOT_FOUND')) {
-          const { data: op } = await supabase
-            .from('operations')
-            .select('status, profit')
-            .eq('id', operationId)
-            .single()
-          if (op && ['WON', 'LOST', 'DRAW'].includes(op.status as string)) {
-            backendStatus = op.status as 'WON' | 'LOST' | 'DRAW'
-            backendProfit = Number(op.profit ?? 0)
-          }
-        } else {
-          console.warn('[trade] settle_trade erro inesperado:', error.message)
+    let official: { status: 'WON' | 'LOST' | 'DRAW'; profit: number } | null = null
+    for (let i = 0; i < 12; i++) {
+      try {
+        const { data } = await api.get(`/operations/${operationId}`)
+        const op = data?.operation
+        if (op && ['WON', 'LOST', 'DRAW'].includes(op.status)) {
+          official = { status: op.status, profit: Number(op.profit ?? 0) }
+          break
         }
-      } else if (result && (result as any).status) {
-        const s = String((result as any).status)
-        if (['WON', 'LOST', 'DRAW'].includes(s)) {
-          backendStatus = s as 'WON' | 'LOST' | 'DRAW'
-          backendProfit = Number((result as any).profit ?? 0)
-        }
-      }
-    } catch (err) {
-      console.warn('[trade] reconcileWithBackend falhou:', err)
-      return
+      } catch { /* tenta de novo */ }
+      await new Promise(r => setTimeout(r, 500))
     }
 
-    // Sem resultado oficial — mantem popup local.
-    if (!backendStatus) return
+    // Sem resultado oficial ainda — mantem popup otimista; saldo reconcilia no refresh.
+    if (!official) return
 
-    const backendWon = backendStatus === 'WON'
-    if (backendWon === localWon && Math.abs(backendProfit - localProfit) < 0.01) return
+    const backendWon = official.status === 'WON'
+    if (backendWon === localWon && Math.abs(official.profit - localProfit) < 0.01) return
 
-    setTradeResult({ direction, amount: investment, profit: backendWon ? backendProfit : 0, won: backendWon })
+    setTradeResult({ direction, amount: investment, profit: backendWon ? official.profit : 0, won: backendWon })
   }
 
   const refreshAccounts = useAuthStore(s => s.refreshAccounts)
@@ -396,11 +376,15 @@ export const TradingPanel = forwardRef<TradingPanelHandle, TradingPanelProps>(fu
       const expiryTimeChart = Math.floor(expiresAtMs / 1000) + BRT_OFFSET
 
       if (remainingMs <= 0) {
-        // Já venceu enquanto o usuário estava fora — liquida imediatamente
-        supabase.rpc('settle_trade', {
-          p_operation_id: op.id,
-          p_exit_price:   livePriceRef.current ?? assetObj.price,
-        }).then(() => refreshAccounts())
+        // Já venceu enquanto o usuário estava fora — o backend (setTimeout/sweeper)
+        // ja liquidou ou liquida em instantes. So buscamos o resultado oficial.
+        reconcileWithBackend(
+          op.id,
+          op.direction as 'CALL' | 'PUT',
+          op.amount,
+          false,
+          0,
+        ).then(() => refreshAccounts())
         continue
       }
 
@@ -443,7 +427,7 @@ export const TradingPanel = forwardRef<TradingPanelHandle, TradingPanelProps>(fu
         onTradeExpired?.(op.id)
         setTradeResult({ direction: dir, amount: op.amount, profit: localProfit, won: localWon })
 
-        await reconcileWithBackend(op.id, exitPrice, dir, op.amount, localWon, localProfit)
+        await reconcileWithBackend(op.id, dir, op.amount, localWon, localProfit)
         await refreshAccounts()
         loadHistory()
       }, remainingMs)
@@ -479,29 +463,30 @@ export const TradingPanel = forwardRef<TradingPanelHandle, TradingPanelProps>(fu
   async function handleDoubleUp(trade: OpenTrade, remaining: number) {
     if (!accountId) return
     const entryPrice = livePriceRef.current ?? trade.entryPrice
-    const expiresAt  = new Date(Date.now() + remaining * 1000).toISOString()
     const BRT_OFFSET = -3 * 3600
     const entryTime  = Math.floor(Date.now() / 1000) + BRT_OFFSET
     const expiryTime = entryTime + remaining
 
-    const { data, error } = await supabase.rpc('place_trade', {
-      p_account_id:   accountId,
-      p_asset_id:     trade.asset.id,
-      p_asset_symbol: trade.asset.label,
-      p_direction:    trade.direction,
-      p_amount:       trade.amount,
-      p_payout_pct:   trade.asset.payout,
-      p_entry_price:  entryPrice,
-      p_expires_at:   expiresAt,
-    })
-
-    if (error) {
-      if (error.message.includes('INSUFFICIENT_BALANCE')) setTradeError('Saldo insuficiente para dobrar.')
+    let newId: string
+    try {
+      const { data } = await api.post('/operations', {
+        accountId,
+        assetId:          trade.asset.id,
+        assetSymbol:      trade.asset.symbol,
+        direction:        trade.direction,
+        amount:           trade.amount,
+        payout:           trade.asset.payout,
+        entryPrice,
+        expiresInSeconds: remaining,
+      })
+      newId = data.operation.id
+    } catch (e: any) {
+      const code = e?.response?.data?.error
+      if (code === 'INSUFFICIENT_BALANCE') setTradeError('Saldo insuficiente para dobrar.')
       else setTradeError('Erro ao dobrar operação.')
       return
     }
 
-    const newId = (data as any)?.id ?? `local-${Date.now()}`
     const utcExpiry = Math.floor(Date.now() / 1000) + remaining
 
     setOpenTrades(prev => [{
@@ -514,19 +499,23 @@ export const TradingPanel = forwardRef<TradingPanelHandle, TradingPanelProps>(fu
 
     const tidDouble = setTimeout(async () => {
       timeoutMap.current.delete(newId)
-      const exitPrice = livePriceRef.current ?? trade.asset.price
-      if (!newId.startsWith('local-')) {
-        await supabase.rpc('settle_trade', { p_operation_id: newId, p_exit_price: exitPrice })
-      }
+      const exitPrice   = livePriceRef.current ?? trade.asset.price
+      const localWon    = trade.direction === 'CALL' ? exitPrice > entryPrice : exitPrice < entryPrice
+      const localProfit = localWon ? parseFloat((trade.amount * (trade.asset.payout / 100)).toFixed(2)) : 0
+
       setOpenTrades(prev => prev.filter(t => t.id !== newId))
       onTradeExpired?.(newId)
+      setTradeResult({ direction: trade.direction, amount: trade.amount, profit: localProfit, won: localWon })
+
+      // Resultado oficial vem do backend (server-authoritative)
+      await reconcileWithBackend(newId, trade.direction, trade.amount, localWon, localProfit)
       await refreshAccounts()
       if (activeTab === 'historico') loadHistory()
     }, remaining * 1000)
     timeoutMap.current.set(newId, tidDouble)
   }
 
-  async function handleEarlyClose(trade: OpenTrade, refund: number) {
+  async function handleEarlyClose(trade: OpenTrade) {
     // Cancela o timeout de liquidação para evitar double-settle
     const tid = timeoutMap.current.get(trade.id)
     if (tid !== undefined) {
@@ -534,12 +523,14 @@ export const TradingPanel = forwardRef<TradingPanelHandle, TradingPanelProps>(fu
       timeoutMap.current.delete(trade.id)
     }
 
-    if (!trade.id.startsWith('local-')) {
-      const { error } = await supabase.rpc('early_close_trade', {
-        p_operation_id: trade.id,
-        p_refund_amount: refund,
-      })
-      if (error) { setTradeError('Erro ao fechar antecipado.'); return }
+    // Reembolso é calculado pelo SERVIDOR — cliente não envia valor.
+    let refund = 0
+    try {
+      const { data } = await api.post(`/operations/${trade.id}/early-close`)
+      refund = Number(data?.refund ?? 0)
+    } catch {
+      setTradeError('Erro ao fechar antecipado.')
+      return
     }
     setOpenTrades(prev => prev.filter(t => t.id !== trade.id))
     onTradeExpired?.(trade.id)
@@ -573,26 +564,33 @@ export const TradingPanel = forwardRef<TradingPanelHandle, TradingPanelProps>(fu
       const BRT_OFFSET   = -3 * 3600
       const entryTime    = Math.floor(Date.now() / 1000) + BRT_OFFSET
       const expiryTime   = entryTime + expiresInSec
-      const expiresAt    = new Date(Date.now() + expiresInSec * 1000).toISOString()
 
-      const { data, error } = await supabase.rpc('place_trade', {
-        p_account_id:   accountId,
-        p_asset_id:     asset.id,
-        p_asset_symbol: asset.label,
-        p_direction:    direction,
-        p_amount:       investment,
-        p_payout_pct:   payoutPct,
-        p_entry_price:  entryPrice,
-        p_expires_at:   expiresAt,
-      })
-
-      if (error) {
-        if (error.message.includes('INSUFFICIENT_BALANCE')) setTradeError('Saldo insuficiente.')
+      // Abre a operacao no BACKEND (server-authoritative). O backend valida o
+      // entryPrice contra o preco do servidor e define payout/entrada oficiais.
+      let operationId: string
+      try {
+        const { data } = await api.post('/operations', {
+          accountId,
+          assetId:          asset.id,
+          assetSymbol:      asset.symbol,
+          direction,
+          amount:           investment,
+          payout:           payoutPct,
+          entryPrice,
+          expiresInSeconds: expiresInSec,
+        })
+        operationId = data.operation.id
+      } catch (e: any) {
+        const code = e?.response?.data?.error
+        if (code === 'INSUFFICIENT_BALANCE')      setTradeError('Saldo insuficiente.')
+        else if (code === 'FOREX_NOT_AVAILABLE')  setTradeError('Forex disponível apenas em conta demo.')
+        else if (code === 'ASSET_NOT_TRADEABLE')  setTradeError('Ativo indisponível para operação.')
+        else if (code === 'PRICE_DIVERGED')       setTradeError('Cotação mudou; tente novamente.')
+        else if (code === 'PRICE_UNAVAILABLE')    setTradeError('Cotação indisponível; tente em instantes.')
         else setTradeError('Erro ao abrir operação.')
         return
       }
 
-      const operationId: string = (data as any)?.id ?? `local-${Date.now()}`
       const utcExpiryTime = Math.floor(Date.now() / 1000) + expiresInSec
 
       setOpenTrades(prev => [{
@@ -626,10 +624,8 @@ export const TradingPanel = forwardRef<TradingPanelHandle, TradingPanelProps>(fu
         onTradeExpired?.(operationId)
         setTradeResult({ direction, amount: investment, profit: localProfit, won: localWon })
 
-        // Background: confirma resultado oficial no banco
-        if (!operationId.startsWith('local-')) {
-          await reconcileWithBackend(operationId, exitPrice, direction, investment, localWon, localProfit)
-        }
+        // Background: confirma resultado oficial no backend (server-authoritative)
+        await reconcileWithBackend(operationId, direction, investment, localWon, localProfit)
 
         await refreshAccounts()
         if (activeTab === 'historico') loadHistory()

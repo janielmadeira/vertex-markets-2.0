@@ -14,4 +14,9 @@ export const KEYS = {
   price:        (symbol: string) => `otc:price:${symbol}`,
   tickChannel:  (symbol: string) => `otc:tick:${symbol}`,
   candleBuffer: (symbol: string, tf: number) => `otc:candles:${symbol}:${tf}`,
+
+  // Pares LIVE (cripto via Binance, forex via Twelve Data). Preco autoritativo
+  // do servidor para esses pares, alimentado pelos feeds em market-data/live/.
+  livePrice:       (symbol: string) => `live:price:${symbol}`,
+  liveTickChannel: (symbol: string) => `live:tick:${symbol}`,
 }
