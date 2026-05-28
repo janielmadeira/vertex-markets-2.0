@@ -175,12 +175,46 @@ export async function approveWithdrawal(withdrawalId: string, adminId: string) {
     // status final 'paid' vem pelo webhook de confirmacao do payout.
     return { ok: true, payoutId: payout.payoutId }
   } catch (err: any) {
-    await prisma.withdrawal.update({
-      where: { id: w.id },
-      data:  { status: 'payout_failed', paymentNotes: `Falha no payout: ${err.message}` },
-    })
+    // Falha sincrona: o payout nao deu certo -> devolve o saldo travado.
+    await failWithdrawalAndRefund(w.id, `Falha no payout: ${err.message}`)
     throw new Error('PAYOUT_FAILED')
   }
+}
+
+// Marca um saque como payout_failed e DEVOLVE o saldo travado. Caminho unico
+// (usado pela falha sincrona e pelo webhook cashout.failed). IDEMPOTENTE: se ja
+// estiver em estado terminal (paid/rejected/cancelled/payout_failed), e no-op,
+// evitando devolver o saldo duas vezes.
+const TERMINAL_STATUSES = new Set(['paid', 'rejected', 'cancelled', 'payout_failed'])
+
+async function failWithdrawalAndRefund(withdrawalId: string, note: string) {
+  const w = await prisma.withdrawal.findUnique({ where: { id: withdrawalId } })
+  if (!w || TERMINAL_STATUSES.has(w.status)) return
+
+  const amount = Number(w.amount)
+  await prisma.$transaction([
+    prisma.withdrawal.update({
+      where: { id: w.id },
+      data:  { status: 'payout_failed', paymentNotes: note },
+    }),
+    prisma.account.update({
+      where: { id: w.accountId },
+      data:  { balance: { increment: amount } },
+    }),
+    prisma.transaction.create({
+      data: {
+        accountId:   w.accountId,
+        type:        'WITHDRAWAL',
+        amount,
+        description: `Saque falhou — valor devolvido (${note})`,
+      },
+    }),
+  ])
+}
+
+// Chamado pelo webhook cashout.failed.
+export async function markWithdrawalPayoutFailed(withdrawalId: string, reason: string) {
+  await failWithdrawalAndRefund(withdrawalId, reason)
 }
 
 // Rejeita/cancela um saque pending e DEVOLVE o saldo travado.
