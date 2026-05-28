@@ -604,6 +604,10 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
     // Skeleton overlay fica visivel ate o chart renderizar (setIsLoading(false)).
     setIsLoading(true)
 
+    // Trava de cancelamento: se o efeito re-roda (troca de paridade/tf) enquanto
+    // um fetch lento de preco/candles ainda esta pendente, a continuacao antiga
+    // bailaria e sobrescreveria o grafico novo. Cada await checa `cancelled`.
+    let cancelled = false
     let chart: any = null
     let priceInterval: ReturnType<typeof setInterval>
     let realPriceInterval: ReturnType<typeof setInterval> | null = null
@@ -616,6 +620,7 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
       if (!chartContainerRef.current) return
 
       const { createChart, ColorType, CrosshairMode, LineStyle, CandlestickSeries, LineSeries, AreaSeries, BarSeries } = await import('lightweight-charts')
+      if (cancelled || !chartContainerRef.current) return
 
       const tc = THEME_COLORS[theme]
       chart = createChart(chartContainerRef.current, {
@@ -670,6 +675,7 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
           const json = await res.json()
           if (json.price) realPrice = json.price
         } catch {}
+        if (cancelled) return  // trocou de ativo durante o fetch — aborta (nao seta interval velho)
         realPriceInterval = setInterval(async () => {
           try {
             const r = await fetch(`/api/market/price?${priceParams}`)
@@ -697,6 +703,7 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
       let otcBackendActive = false   // true quando histórico veio do backend OTC (etapa C)
       if (otcSymbolForHistory && tfSupportedByOtc && !realConfig) {
         const otcCandles = await fetchOtcCandles(otcSymbolForHistory, selectedTf.seconds, candleLimit)
+        if (cancelled) return  // trocou de ativo durante o fetch OTC — aborta
         if (otcCandles && otcCandles.length > 0) {
           candles = otcCandles.map(c => ({
             time:  (c.t - 3 * 3600) as any,   // backend epoch UTC -> eixo BRT do chart (UTC-3)
@@ -758,6 +765,8 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
           }
         } catch {}
       }
+
+      if (cancelled) return  // trocou de ativo durante o fetch de candles reais — aborta antes de renderizar
 
       // BB fill areas must be added BEFORE the main series so candles render on top
       const bbData = showBB ? calculateBollingerBands(candles, bbSettings.period, bbSettings.deviation) : []
@@ -1069,6 +1078,7 @@ export function TradingChart({ asset, onInfoClick, theme = 'noite', autoScroll =
     if (chartContainerRef.current) resizeObserver.observe(chartContainerRef.current)
 
     return () => {
+      cancelled = true
       clearInterval(priceInterval)
       if (rafId !== null) cancelAnimationFrame(rafId)
       if (realPriceInterval) clearInterval(realPriceInterval)
