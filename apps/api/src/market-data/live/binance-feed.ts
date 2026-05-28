@@ -10,7 +10,12 @@ import { cryptoFeedSymbols } from '../catalog.js'
 // Usa polling REST (em vez de WebSocket) porque o runtime e Node 20, que nao
 // tem WebSocket global. /api/v3/ticker/price aceita varios simbolos numa
 // chamada so; a 1 req/s o peso fica muito abaixo do limite da Binance.
+//
+// Usa data-api.binance.vision (endpoint publico oficial de market data) em vez
+// de api.binance.com porque a VPS esta nos EUA (SFO) e api.binance.com bloqueia
+// IPs americanos com HTTP 451. O .vision nao tem bloqueio geografico.
 
+const BINANCE_DATA_BASE = 'https://data-api.binance.vision'
 const POLL_INTERVAL_MS = 1_000
 let pollTimer: NodeJS.Timeout | null = null
 let stopped = false
@@ -21,7 +26,7 @@ async function pollOnce(symbols: string[]) {
   inFlight = true
   try {
     const symbolsParam = encodeURIComponent(JSON.stringify(symbols))
-    const url = `https://api.binance.com/api/v3/ticker/price?symbols=${symbolsParam}`
+    const url = `${BINANCE_DATA_BASE}/api/v3/ticker/price?symbols=${symbolsParam}`
     const res = await fetch(url)
     if (!res.ok) {
       console.error('[binance-feed] http', res.status)

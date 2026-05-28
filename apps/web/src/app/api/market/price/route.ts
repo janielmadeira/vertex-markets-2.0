@@ -24,7 +24,9 @@ async function fetchYahoo(symbol: string): Promise<number> {
 }
 
 async function fetchBinance(symbol: string): Promise<number> {
-  const url = `https://api.binance.com/api/v3/ticker/price?symbol=${encodeURIComponent(symbol)}`
+  // data-api.binance.vision: endpoint publico oficial sem bloqueio geografico
+  // (api.binance.com retorna 451 para IPs dos EUA, onde roda a VPS/SFO).
+  const url = `https://data-api.binance.vision/api/v3/ticker/price?symbol=${encodeURIComponent(symbol)}`
   const res = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(3_000) })
   const json = await res.json()
   if (!json.price) throw new Error('Binance error')

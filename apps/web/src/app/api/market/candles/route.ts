@@ -56,7 +56,9 @@ async function fetchYahooCandles(symbol: string, tfSeconds: number, limit: numbe
 }
 
 async function fetchBinanceCandles(symbol: string, interval: string, limit: number): Promise<Candle[]> {
-  const url = `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${limit}`
+  // data-api.binance.vision: endpoint publico oficial sem bloqueio geografico
+  // (api.binance.com retorna 451 para IPs dos EUA, onde roda a VPS/SFO).
+  const url = `https://data-api.binance.vision/api/v3/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${limit}`
   const res  = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(5_000) })
   const json = await res.json()
   if (!Array.isArray(json)) throw new Error('Binance error')
