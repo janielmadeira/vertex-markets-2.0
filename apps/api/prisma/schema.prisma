@@ -2,9 +2,7 @@
 // Convencoes: uuid em IDs, snake_case via @map, sem campo email/password (gerenciado pelo Supabase Auth).
 //
 // Tabelas modeladas: apenas as que o Fastify le/escreve.
-// deposits/withdrawals: modeladas aqui porque o Fastify integra com o BSPay
-// (gera cobranca, recebe webhook, credita saldo, processa payout).
-// As demais (kyc_submissions, support_*, admin_audit_log)
+// As demais (deposits, withdrawals, kyc_submissions, support_*, admin_audit_log)
 // ficam acessiveis via RPCs Supabase no painel admin -> nao precisam de model aqui.
 
 generator client {
@@ -45,20 +43,20 @@ enum PriceSource {
 // Profile equivale ao 'user' do dominio. ID == auth.users(id).
 // Nao tem email/password aqui -> esses vivem em auth.users (Supabase Auth).
 model Profile {
-  id                 String    @id @db.Uuid
-  name               String
-  kycStatus          String    @default("pending") @map("kyc_status")
-  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  bonusBalance       Decimal   @default(0) @map("bonus_balance") @db.Decimal
-  rolloverRequired   Decimal   @default(0) @map("rollover_required") @db.Decimal
-  rolloverCompleted  Decimal   @default(0) @map("rollover_completed") @db.Decimal
-  blockedAt          DateTime? @map("blocked_at") @db.Timestamptz(6)
-  blockedReason      String?   @map("blocked_reason")
-  cpf                String?
-  phone              String?
-  customPayoutForex  Decimal?  @map("custom_payout_forex") @db.Decimal
-  customPayoutOtc    Decimal?  @map("custom_payout_otc") @db.Decimal
-  customPayoutCrypto Decimal?  @map("custom_payout_crypto") @db.Decimal
+  id                   String    @id @db.Uuid
+  name                 String
+  kycStatus            String    @default("pending") @map("kyc_status")
+  createdAt            DateTime  @default(now())       @map("created_at") @db.Timestamptz(6)
+  bonusBalance         Decimal   @default(0)           @map("bonus_balance")        @db.Decimal
+  rolloverRequired     Decimal   @default(0)           @map("rollover_required")    @db.Decimal
+  rolloverCompleted    Decimal   @default(0)           @map("rollover_completed")   @db.Decimal
+  blockedAt            DateTime? @map("blocked_at")    @db.Timestamptz(6)
+  blockedReason        String?   @map("blocked_reason")
+  cpf                  String?
+  phone                String?
+  customPayoutForex    Decimal?  @map("custom_payout_forex")  @db.Decimal
+  customPayoutOtc      Decimal?  @map("custom_payout_otc")    @db.Decimal
+  customPayoutCrypto   Decimal?  @map("custom_payout_crypto") @db.Decimal
 
   accounts Account[]
 
@@ -66,9 +64,9 @@ model Profile {
 }
 
 model AdminUser {
-  userId    String   @id @map("user_id") @db.Uuid
+  userId    String   @id                @map("user_id")    @db.Uuid
   role      String   @default("admin")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdAt DateTime @default(now())    @map("created_at") @db.Timestamptz(6)
   createdBy String?  @map("created_by") @db.Uuid
 
   @@map("admin_users")
@@ -77,7 +75,7 @@ model AdminUser {
 model Account {
   id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId    String   @map("user_id") @db.Uuid
-  type      String // 'DEMO' | 'REAL' (Supabase guarda como text, nao enum)
+  type      String   // 'DEMO' | 'REAL' (Supabase guarda como text, nao enum)
   balance   Decimal  @default(0) @db.Decimal
   currency  String   @default("BRL")
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -85,8 +83,6 @@ model Account {
   profile      Profile       @relation(fields: [userId], references: [id], onDelete: Cascade)
   operations   Operation[]
   transactions Transaction[]
-  deposits     Deposit[]
-  withdrawals  Withdrawal[]
 
   @@unique([userId, type], map: "accounts_user_id_type_key")
   @@map("accounts")
@@ -94,19 +90,19 @@ model Account {
 
 model Operation {
   id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  accountId   String    @map("account_id") @db.Uuid
+  accountId   String    @map("account_id")   @db.Uuid
   assetId     String    @map("asset_id")
   assetSymbol String    @map("asset_symbol")
-  direction   String // 'CALL' | 'PUT'
+  direction   String    // 'CALL' | 'PUT'
   amount      Decimal   @db.Decimal
-  payoutPct   Decimal   @map("payout_pct") @db.Decimal
-  entryPrice  Decimal   @map("entry_price") @db.Decimal
-  exitPrice   Decimal?  @map("exit_price") @db.Decimal
+  payoutPct   Decimal   @map("payout_pct")   @db.Decimal
+  entryPrice  Decimal   @map("entry_price")  @db.Decimal
+  exitPrice   Decimal?  @map("exit_price")   @db.Decimal
   profit      Decimal?  @db.Decimal
   status      String    @default("OPEN")
-  expiresAt   DateTime  @map("expires_at") @db.Timestamptz(6)
-  closedAt    DateTime? @map("closed_at") @db.Timestamptz(6)
-  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt   DateTime  @map("expires_at")   @db.Timestamptz(6)
+  closedAt    DateTime? @map("closed_at")    @db.Timestamptz(6)
+  createdAt   DateTime  @default(now())      @map("created_at") @db.Timestamptz(6)
 
   // Audit trail (Fase 5)
   entryPriceSource PriceSource  @default(CLIENT) @map("entry_price_source")
@@ -126,7 +122,7 @@ model Operation {
 model Transaction {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   accountId   String   @map("account_id") @db.Uuid
-  type        String // texto livre, mapeado dos enums TransactionType pelo app
+  type        String   // texto livre, mapeado dos enums TransactionType pelo app
   amount      Decimal  @db.Decimal
   description String?
   operationId String?  @map("operation_id") @db.Uuid
@@ -138,66 +134,13 @@ model Transaction {
   @@map("transactions")
 }
 
-// Deposito via BSPay (cash-in Pix). external_id e nosso id idempotente;
-// bspay_id e o id da cobranca no BSPay. status: pending | confirmed | failed.
-model Deposit {
-  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId           String    @map("user_id") @db.Uuid
-  accountId        String    @map("account_id") @db.Uuid
-  externalId       String    @unique @map("external_id")
-  bspayId          String?   @map("bspay_id")
-  amount           Decimal   @db.Decimal
-  status           String    @default("pending") // pending | confirmed | failed
-  qrcode           String?
-  bonusAmount      Decimal   @default(0) @map("bonus_amount") @db.Decimal
-  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  confirmedAt      DateTime? @map("confirmed_at") @db.Timestamptz(6)
-  // anti-fraude / trilha admin
-  isFake           Boolean   @default(false) @map("is_fake")
-  fakeReason       String?   @map("fake_reason")
-  fakeMarkedBy     String?   @map("fake_marked_by") @db.Uuid
-  fakeMarkedAt     DateTime? @map("fake_marked_at") @db.Timestamptz(6)
-  confirmedByAdmin String?   @map("confirmed_by_admin") @db.Uuid
-  confirmNotes     String?   @map("confirm_notes")
-
-  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
-
-  @@index([accountId])
-  @@map("deposits")
-}
-
-// Saque via BSPay (cash-out Pix). status:
-// pending -> approved -> payout_processing -> paid (ou rejected/cancelled/payout_failed).
-model Withdrawal {
-  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId         String    @map("user_id") @db.Uuid
-  accountId      String    @map("account_id") @db.Uuid
-  amount         Decimal   @db.Decimal
-  pixKeyType     String    @map("pix_key_type") // cpf | cnpj | email | phone | random
-  pixKey         String    @map("pix_key")
-  status         String    @default("pending") // pending | approved | rejected | cancelled | paid | payout_processing | payout_failed
-  adminNotes     String?   @map("admin_notes")
-  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  processedAt    DateTime? @map("processed_at") @db.Timestamptz(6)
-  paidAt         DateTime? @map("paid_at") @db.Timestamptz(6)
-  paidByAdmin    String?   @map("paid_by_admin") @db.Uuid
-  paymentProofId String?   @map("payment_proof_id")
-  paymentNotes   String?   @map("payment_notes")
-  bspayPayoutId  String?   @map("bspay_payout_id")
-
-  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
-
-  @@index([accountId])
-  @@map("withdrawals")
-}
-
 model OtcAsset {
-  id              String         @id @default(cuid()) // cuid gerado no app, persiste como text na DB (compat com operations.asset_id text)
+  id              String         @id @default(cuid())  // cuid gerado no app, persiste como text na DB (compat com operations.asset_id text)
   symbol          String         @unique
   name            String
   basePrice       Decimal        @map("base_price") @db.Decimal(18, 5)
   volatility      Decimal        @default(0.001) @db.Decimal(8, 6)
-  trend           Decimal        @default(0) @db.Decimal(8, 6)
+  trend           Decimal        @default(0)     @db.Decimal(8, 6)
   payout          Int            @default(85)
   decimals        Int            @default(5)
   status          OtcAssetStatus @default(ACTIVE)
