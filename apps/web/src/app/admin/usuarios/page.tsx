@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import {
   Users, UserPlus, Search, Eye, Edit2, Ban, RefreshCw, Trash2,
-  RotateCw, Loader2, TrendingUp,
+  RotateCw, Loader2, TrendingUp, DollarSign,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { UserDetailsModal } from '@/components/admin/UserDetailsModal'
@@ -73,6 +73,41 @@ export default function UsuariosAdminPage() {
     setActionBusy(u.id)
     try {
       const { error } = await supabase.rpc('admin_reset_demo', { p_user_id: u.id })
+      if (error) throw error
+      await loadUsers()
+    } catch (e: any) {
+      alert('Erro: ' + (e.message ?? 'desconhecido'))
+    } finally {
+      setActionBusy(null)
+    }
+  }
+
+  // Crédito/débito manual de saldo (fallback enquanto o gateway nao esta ativo:
+  // usuario paga Pix na chave da casa -> admin credita aqui). Usa admin_adjust_balance,
+  // que registra transacao + audit log. p_delta positivo credita, negativo debita.
+  async function handleAdjustBalance(u: Row) {
+    const tipo = (prompt('Tipo de conta (REAL ou DEMO):', 'REAL') || '').trim().toUpperCase()
+    if (tipo !== 'REAL' && tipo !== 'DEMO') { if (tipo) alert('Tipo inválido. Use REAL ou DEMO.'); return }
+
+    const valorStr = prompt(`Valor em R$ na conta ${tipo} de ${u.name}\n(positivo credita, negativo debita):`)
+    if (!valorStr) return
+    const valor = Number(valorStr.replace(',', '.'))
+    if (!Number.isFinite(valor) || valor === 0) { alert('Valor inválido.'); return }
+
+    const reason = prompt('Motivo (registrado no audit log):')
+    if (!reason || reason.trim().length < 3) { alert('Motivo obrigatório (mín. 3 caracteres).'); return }
+
+    const acao = valor > 0 ? 'CREDITAR' : 'DEBITAR'
+    if (!confirm(`${acao} R$ ${Math.abs(valor).toFixed(2)} na conta ${tipo} de ${u.name}?`)) return
+
+    setActionBusy(u.id)
+    try {
+      const { error } = await supabase.rpc('admin_adjust_balance', {
+        p_user_id:      u.id,
+        p_account_type: tipo,
+        p_delta:        valor,
+        p_reason:       reason.trim(),
+      })
       if (error) throw error
       await loadUsers()
     } catch (e: any) {
@@ -264,6 +299,9 @@ export default function UsuariosAdminPage() {
                     <div className="flex items-center justify-end gap-1">
                       <ActionBtn onClick={() => setSelectedUser(u.id)} title="Ver detalhes"><Eye size={14} /></ActionBtn>
                       <ActionBtn onClick={() => setEditingUser(u.id)} title="Editar"><Edit2 size={14} /></ActionBtn>
+                      <ActionBtn onClick={() => handleAdjustBalance(u)} disabled={actionBusy === u.id} title="Creditar/debitar saldo">
+                        <DollarSign size={14} className="text-green-400" />
+                      </ActionBtn>
                       <ActionBtn
                         onClick={() => handleToggleBlock(u)}
                         disabled={actionBusy === u.id}
