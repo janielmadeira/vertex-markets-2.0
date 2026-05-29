@@ -1,6 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
 
 const cache = new Map<string, { price: number; ts: number }>()
+
+// Cliente Supabase (anon) para ler live_prices. live_prices tem RLS read-all,
+// entao a anon key basta. So leitura.
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+)
+
+// Le o preco forex publicado pelo vertex-api em live_prices (centralizado:
+// nenhum navegador chama o Twelve Data direto -> cota protegida). live_prices.symbol
+// guarda o simbolo do provider (ex: 'EUR/USD'). Rejeita se ausente ou muito velho
+// (>120s), pro caller cair no fallback direto.
+async function readLivePrice(symbol: string): Promise<number> {
+  const { data, error } = await supabase
+    .from('live_prices')
+    .select('price, updated_at')
+    .eq('symbol', symbol)
+    .maybeSingle()
+  if (error || !data) throw new Error('live_prices: sem registro')
+  const ageMs = Date.now() - new Date(data.updated_at as string).getTime()
+  if (ageMs > 120_000) throw new Error('live_prices: preco velho')
+  const price = Number(data.price)
+  if (!price || isNaN(price)) throw new Error('live_prices: preco invalido')
+  return price
+}
 
 // TTLs diferenciados por fonte. Twelve Data tem cota limitada (800 req/dia),
 // entao cacheamos mais agressivamente. Binance/Yahoo nao tem cota — TTL menor.
@@ -60,9 +86,16 @@ export async function GET(req: NextRequest) {
 
   try {
     let price: number
-    if      (source === 'binance')    price = await fetchBinance(symbol)
-    else if (source === 'twelvedata') price = await fetchTwelveData(symbol)
-    else                              price = await fetchYahoo(symbol)
+    if (source === 'binance') {
+      price = await fetchBinance(symbol)
+    } else if (source === 'twelvedata') {
+      // Centralizado: le da live_prices (alimentada pelo publisher do vertex-api).
+      // Fallback pro Twelve Data direto so se a tabela estiver ausente/velha.
+      try { price = await readLivePrice(symbol) }
+      catch { price = await fetchTwelveData(symbol) }
+    } else {
+      price = await fetchYahoo(symbol)
+    }
     cache.set(cacheKey, { price, ts: Date.now() })
     return NextResponse.json({ price })
   } catch (e: any) {
