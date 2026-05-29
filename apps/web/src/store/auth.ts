@@ -7,6 +7,21 @@ import { supabase } from '@/lib/supabase'
 // "cannot add postgres_changes callbacks after subscribe()".
 let realtimeInitialized = false
 
+// Lembra a conta escolhida (DEMO/REAL) entre recarregamentos da pagina.
+// Sem isso o isDemo sempre volta para true (demo) ao dar F5.
+const DEMO_PREF_KEY = 'vertex:isDemo'
+
+function readIsDemoPref(): boolean {
+  if (typeof window === 'undefined') return true   // SSR: default demo
+  const v = window.localStorage.getItem(DEMO_PREF_KEY)
+  return v === null ? true : v === 'true'          // sem preferencia salva => demo
+}
+
+function writeIsDemoPref(v: boolean) {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(DEMO_PREF_KEY, String(v))
+}
+
 export interface Account {
   id:       string
   type:     'DEMO' | 'REAL'
@@ -68,10 +83,12 @@ async function buildUser(supabaseUser: any, accounts: Account[]): Promise<User> 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user:    null,
   token:   null,
-  isDemo:  true,
+  // Le a conta escolhida ja na criacao do estado (localStorage e sincrono, sem rede).
+  // Assim o primeiro render ja sai na conta certa e nao ha "flash" de DEMO no F5.
+  isDemo:  readIsDemoPref(),
   loading: true,
 
-  setIsDemo: (v) => set({ isDemo: v }),
+  setIsDemo: (v) => { writeIsDemoPref(v); set({ isDemo: v }) },
 
   login: async (email, password) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
@@ -104,7 +121,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (!session) { set({ loading: false }); return }
     const accounts = await fetchAccounts(session.user.id)
     const user = await buildUser(session.user, accounts)
-    set({ user, token: session.access_token, loading: false })
+    set({ user, token: session.access_token, loading: false, isDemo: readIsDemoPref() })
 
     if (realtimeInitialized) return
     realtimeInitialized = true
