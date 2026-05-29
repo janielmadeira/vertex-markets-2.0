@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { ChevronLeft, Copy, Check, Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
-import { useAuthStore, useCurrentAccount } from '@/store/auth'
+import { useAuthStore } from '@/store/auth'
 import { cn } from '@/lib/utils'
 import QRCode from 'qrcode'
 
@@ -18,7 +18,9 @@ type Step = 'amount' | 'qrcode' | 'success'
 
 export function PixCheckout({ onBack, onSuccess }: PixCheckoutProps) {
   const user = useAuthStore(s => s.user)
-  const account = useAuthStore(useCurrentAccount)
+  // Deposito de dinheiro real vai SEMPRE pra conta REAL — nunca a conta atual,
+  // que pode estar em DEMO (bug: R$ creditava na DEMO).
+  const realAccount = user?.accounts?.find(a => a.type === 'REAL') ?? null
 
   const [step, setStep]           = useState<Step>('amount')
   const [amount, setAmount]       = useState('')
@@ -58,7 +60,7 @@ export function PixCheckout({ onBack, onSuccess }: PixCheckoutProps) {
   const handleCreate = useCallback(async () => {
     const val = parseFloat(amount.replace(',', '.'))
     if (isNaN(val) || val < 10) { setError('Valor mínimo: R$10,00'); return }
-    if (!user || !account) { setError('Conta não encontrada'); return }
+    if (!user || !realAccount) { setError('Conta REAL não encontrada'); return }
 
     setLoading(true)
     setError(null)
@@ -66,7 +68,7 @@ export function PixCheckout({ onBack, onSuccess }: PixCheckoutProps) {
       const res = await fetch('/api/payments/pix/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: val, userId: user.id, accountId: account.id }),
+        body: JSON.stringify({ amount: val, userId: user.id, accountId: realAccount.id }),
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? 'Erro ao criar PIX')
@@ -78,7 +80,7 @@ export function PixCheckout({ onBack, onSuccess }: PixCheckoutProps) {
     } finally {
       setLoading(false)
     }
-  }, [amount, user, account])
+  }, [amount, user, realAccount])
 
   const copyCode = () => {
     if (!qrcode) return
