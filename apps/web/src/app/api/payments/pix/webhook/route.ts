@@ -4,9 +4,15 @@ import { createClient } from '@supabase/supabase-js'
 const WEBHOOK_SECRET = process.env.BSPAY_WEBHOOK_SECRET!
 
 export async function POST(req: NextRequest) {
-  // Verifica segredo no query string
+  // Log no topo: registra TODA chamada, antes de qualquer validacao.
+  // Diagnostico: se nao aparecer esse log apos um pagamento, BSPay nao
+  // esta chamando a URL. Se aparecer, vemos secret presente/ausente.
   const secret = req.nextUrl.searchParams.get('secret')
+  console.log('[PIX webhook] received',
+    { ua: req.headers.get('user-agent'), hasSecret: !!secret, secretOk: secret === WEBHOOK_SECRET })
+
   if (!secret || secret !== WEBHOOK_SECRET) {
+    console.warn('[PIX webhook] rejected: bad secret')
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
