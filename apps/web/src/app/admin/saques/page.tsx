@@ -21,7 +21,7 @@ interface Row {
   amount:           number
   pix_key_type:     string
   pix_key:          string
-  status:           'pending' | 'approved' | 'paid' | 'rejected' | 'cancelled'
+  status:           'pending' | 'approved' | 'paid' | 'rejected' | 'cancelled' | 'payout_processing' | 'payout_failed'
   admin_notes:      string | null
   created_at:       string
   processed_at:     string | null

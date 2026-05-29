@@ -17,6 +17,7 @@ export interface KycSubmission {
   doc_front_path:  string
   doc_back_path:   string
   selfie_path:     string
+  real_balance:    number   // retornado por admin_list_kyc (saldo real do usuario)
 }
 
 interface Props {
