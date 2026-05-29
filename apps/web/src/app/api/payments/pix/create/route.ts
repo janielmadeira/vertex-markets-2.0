@@ -5,6 +5,9 @@ const BSPAY_BASE = 'https://api.bspay.co/v2'
 const CLIENT_ID  = process.env.BSPAY_CLIENT_ID!
 const CLIENT_SECRET = process.env.BSPAY_CLIENT_SECRET!
 const WEBHOOK_SECRET = process.env.BSPAY_WEBHOOK_SECRET!
+// BSPay tem allowlist de User-Agent — o valor precisa estar liberado no dashboard.
+// Sem isso (fetch do Node manda 'node'), o BSPay rejeita com INVALID_CREDENTIALS.
+const USER_AGENT = process.env.BSPAY_USER_AGENT ?? 'VertexMarkets/1.0'
 
 let tokenCache: { token: string; expiresAt: number } | null = null
 
@@ -16,9 +19,10 @@ async function getBspayToken(): Promise<string> {
     method: 'POST',
     headers: {
       Authorization: `Basic ${credentials}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
+      'Content-Type': 'application/json',
+      'User-Agent': USER_AGENT,
     },
-    body: 'grant_type=client_credentials',
+    body: JSON.stringify({ grant_type: 'client_credentials' }),
   })
 
   if (!res.ok) {
@@ -54,6 +58,7 @@ export async function POST(req: NextRequest) {
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
+        'User-Agent': USER_AGENT,
       },
       body: JSON.stringify({
         amount,
