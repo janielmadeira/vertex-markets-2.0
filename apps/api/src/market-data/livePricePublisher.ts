@@ -1,13 +1,17 @@
-import { supabaseAdmin } from '../supabaseAdmin.js'
+import { prisma } from '../prisma.js'
 import { getCurrentPriceMemory } from './otc/engine.js'
 
-// Publica precos autoritativos na tabela Supabase live_prices.
-// settle_trade/place_trade leem dela em vez de confiar no preco do cliente.
+// Publica precos autoritativos na tabela live_prices (Postgres Supabase, mesma
+// conexao Prisma usada pelos candles). settle_trade/place_trade leem dela em vez
+// de confiar no preco do cliente.
 //
-// Mapeamento asset_id (front/operations.asset_id) <-> simbolo no provider.
-// Tem que casar com:
-//   - OTC:    seed-otc.ts (SEEDS) + web/src/lib/otcClient.ts (OTC_SYMBOL_MAP)
-//   - cripto/forex: web/src/lib/marketSymbols.ts (REAL_ASSETS)
+// Forex real (Twelve Data) NAO entra: o plano Basic 8 (8 req/min) nao sustenta
+// polling + graficos. Forex e coberto pelas versoes OTC (engine). Cripto via
+// Binance (gratis, sem limite).
+//
+// Mapeamento asset_id (operations.asset_id) <-> simbolo. Casa com:
+//   - OTC:    seed-otc.ts + web/src/lib/otcClient.ts (OTC_SYMBOL_MAP)
+//   - cripto: web/src/lib/marketSymbols.ts (REAL_ASSETS)
 
 type AssetEntry = { assetId: string; symbol: string }
 
@@ -32,24 +36,27 @@ const CRYPTO_ASSETS: AssetEntry[] = [
   { assetId: 'bnb', symbol: 'BNBUSDT' },
 ]
 
-const FOREX_ASSETS: AssetEntry[] = [
-  { assetId: 'eur-usd', symbol: 'EUR/USD' },
-  { assetId: 'gbp-usd', symbol: 'GBP/USD' },
-  { assetId: 'usd-jpy', symbol: 'USD/JPY' },
-]
-
 type PriceRow = { assetId: string; symbol: string; price: number; source: string }
 
+// Upsert batch via Prisma raw. assetId/symbol/source sao constantes do servidor
+// (nao input de usuario) e price e number validado -> sem vetor de injecao.
 async function upsert(rows: PriceRow[]) {
-  if (!supabaseAdmin || rows.length === 0) return
-  const now = new Date().toISOString()
-  const { error } = await supabaseAdmin
-    .from('live_prices')
-    .upsert(
-      rows.map(r => ({ asset_id: r.assetId, symbol: r.symbol, price: r.price, source: r.source, updated_at: now })),
-      { onConflict: 'asset_id' },
+  const valid = rows.filter(r => Number.isFinite(r.price) && r.price > 0)
+  if (valid.length === 0) return
+  const values = valid
+    .map(r => `('${r.assetId}','${r.symbol}',${r.price},'${r.source}',now())`)
+    .join(',')
+  try {
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO live_prices (asset_id, symbol, price, source, updated_at)
+       VALUES ${values}
+       ON CONFLICT (asset_id) DO UPDATE
+         SET price = EXCLUDED.price, symbol = EXCLUDED.symbol,
+             source = EXCLUDED.source, updated_at = now()`,
     )
-  if (error) console.error('[live-prices] upsert:', error.message)
+  } catch (err: any) {
+    console.error('[live-prices] upsert:', err?.message ?? err)
+  }
 }
 
 // OTC: le preco corrente da memoria do engine (sem I/O externo).
@@ -63,61 +70,39 @@ function publishOtc() {
 }
 
 async function fetchBinance(symbol: string): Promise<number> {
-  // data-api.binance.vision: endpoint publico sem bloqueio geografico (a VPS roda em SFO).
+  // data-api.binance.vision: endpoint publico sem bloqueio geografico (VPS em SFO).
   const res = await fetch(`https://data-api.binance.vision/api/v3/ticker/price?symbol=${encodeURIComponent(symbol)}`, {
     signal: AbortSignal.timeout(4_000),
   })
-  const json = await res.json() as { price?: string }
+  const json = (await res.json()) as { price?: string }
   const price = parseFloat(json.price ?? '')
   if (!price || isNaN(price)) throw new Error(`binance ${symbol}: sem preco`)
   return price
 }
 
-async function fetchTwelveData(symbol: string): Promise<number> {
-  const apiKey = process.env.TWELVE_DATA_API_KEY
-  if (!apiKey) throw new Error('TWELVE_DATA_API_KEY ausente')
-  const res = await fetch(`https://api.twelvedata.com/price?symbol=${encodeURIComponent(symbol)}&apikey=${apiKey}`, {
-    signal: AbortSignal.timeout(5_000),
-  })
-  const json = await res.json() as { price?: string; status?: string; message?: string }
-  if (json.status === 'error') throw new Error(`twelvedata ${symbol}: ${json.message}`)
-  const price = parseFloat(json.price ?? '')
-  if (!price || isNaN(price)) throw new Error(`twelvedata ${symbol}: preco invalido`)
-  return price
-}
-
-// Cripto + forex: busca dos providers reais. Falha de um par nao derruba os outros.
-async function publishReal() {
+// Cripto: Binance a cada 10s. Falha de um par nao derruba os outros.
+async function publishCrypto() {
   const rows: PriceRow[] = []
-  await Promise.all([
-    ...CRYPTO_ASSETS.map(async a => {
+  await Promise.all(
+    CRYPTO_ASSETS.map(async a => {
       try { rows.push({ assetId: a.assetId, symbol: a.symbol, price: await fetchBinance(a.symbol), source: 'binance' }) }
       catch (e: any) { console.error('[live-prices]', e.message) }
     }),
-    ...FOREX_ASSETS.map(async a => {
-      try { rows.push({ assetId: a.assetId, symbol: a.symbol, price: await fetchTwelveData(a.symbol), source: 'twelvedata' }) }
-      catch (e: any) { console.error('[live-prices]', e.message) }
-    }),
-  ])
+  )
   return upsert(rows)
 }
 
 let otcTimer: NodeJS.Timeout | null = null
-let realTimer: NodeJS.Timeout | null = null
+let cryptoTimer: NodeJS.Timeout | null = null
 
 export function startLivePricePublisher() {
-  if (!supabaseAdmin) {
-    console.warn('[live-prices] publisher desativado (sem service_role key)')
-    return
-  }
-  // OTC: 2s (preco vem da memoria, barato). Cripto/forex: 10s (protege cota Twelve Data).
-  otcTimer  = setInterval(() => { publishOtc().catch(e => console.error('[live-prices] otc:', e.message)) }, 2_000)
-  realTimer = setInterval(() => { publishReal().catch(e => console.error('[live-prices] real:', e.message)) }, 10_000)
-  // primeiro publish imediato pra tabela nao ficar vazia no boot
-  publishReal().catch(() => {})
-  console.log('[live-prices] publisher iniciado (OTC 2s, cripto/forex 10s)')
+  // OTC: 2s (memoria, barato). Cripto: 10s.
+  otcTimer    = setInterval(() => { publishOtc().catch(e => console.error('[live-prices] otc:', e.message)) }, 2_000)
+  cryptoTimer = setInterval(() => { publishCrypto().catch(e => console.error('[live-prices] crypto:', e.message)) }, 10_000)
+  publishCrypto().catch(() => {})  // primeiro publish imediato
+  console.log('[live-prices] publisher iniciado via Prisma (OTC 2s, cripto 10s)')
 
-  const stop = () => { if (otcTimer) clearInterval(otcTimer); if (realTimer) clearInterval(realTimer) }
+  const stop = () => { if (otcTimer) clearInterval(otcTimer); if (cryptoTimer) clearInterval(cryptoTimer) }
   process.once('SIGTERM', stop)
   process.once('SIGINT', stop)
 }
