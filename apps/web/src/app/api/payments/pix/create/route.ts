@@ -77,13 +77,19 @@ export async function POST(req: NextRequest) {
     const qrcode = bspayData?.data?.payment_info?.qrcode ?? bspayData?.data?.qrcode ?? null
     const bspayId = bspayData?.data?.id ?? bspayData?.data?.transaction_id ?? null
 
-    // Salva depósito pendente no Supabase (usa service role para bypassar RLS)
+    // Salva depósito pendente no Supabase. PRECISA da service_role: o RLS de
+    // deposits exige auth.uid() = user_id, e aqui nao ha sessao de usuario.
+    // Sem a service_role, o insert e bloqueado silenciosamente.
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      console.error('[PIX create] SUPABASE_SERVICE_ROLE_KEY ausente — insert seria bloqueado pelo RLS')
+      return NextResponse.json({ error: 'Configuração de pagamento incompleta (service role).' }, { status: 500 })
+    }
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
     )
 
-    await supabase.from('deposits').insert({
+    const { error: insErr } = await supabase.from('deposits').insert({
       user_id:     userId,
       account_id:  accountId,
       external_id: externalId,
@@ -92,6 +98,10 @@ export async function POST(req: NextRequest) {
       status:      'pending',
       qrcode,
     })
+    if (insErr) {
+      console.error('[PIX create] falha ao gravar deposito:', insErr)
+      return NextResponse.json({ error: 'Falha ao registrar depósito. Tente novamente.' }, { status: 500 })
+    }
 
     return NextResponse.json({ externalId, qrcode, amount })
   } catch (err: any) {
