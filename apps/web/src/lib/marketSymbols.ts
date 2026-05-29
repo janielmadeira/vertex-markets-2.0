@@ -13,10 +13,9 @@ export interface RealAssetConfig {
 // Asset IDs aqui devem casar com ASSETS em mockData.ts. Pra adicionar novo asset
 // real: 1) add em ASSETS; 2) add aqui; 3) confirma que symbol existe no provider.
 export const REAL_ASSETS: Record<string, RealAssetConfig> = {
-  // ── Forex via Twelve Data (3 majors) ───────────────────────────────
+  // ── Forex via Twelve Data (2 majors, centralizado via live_prices) ──
   'eur-usd': { symbol: 'EUR/USD', source: 'twelvedata' },
   'gbp-usd': { symbol: 'GBP/USD', source: 'twelvedata' },
-  'usd-jpy': { symbol: 'USD/JPY', source: 'twelvedata' },
 
   // ── Cripto via Binance (5 majors) ──────────────────────────────────
   'btc': { symbol: 'BTCUSDT', source: 'binance' },

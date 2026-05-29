@@ -32,7 +32,6 @@ export const ASSETS: Asset[] = [
   // ── FOREX REAL (Yahoo) — operam so com mercado aberto seg-sex
   { id: 'eur-usd', symbol: 'EUR/USD', label: 'EUR/USD', type: 'Forex', category: 'Moedas', payout: 92, payout5min: 92, flag1: '🇪🇺', flag2: '🇺🇸', code1: 'eu', code2: 'us', price: 1.0854, change24h: 0.12 },
   { id: 'gbp-usd', symbol: 'GBP/USD', label: 'GBP/USD', type: 'Forex', category: 'Moedas', payout: 92, payout5min: 92, flag1: '🇬🇧', flag2: '🇺🇸', code1: 'gb', code2: 'us', price: 1.2734, change24h: 0.42 },
-  { id: 'usd-jpy', symbol: 'USD/JPY', label: 'USD/JPY', type: 'Forex', category: 'Moedas', payout: 92, payout5min: 92, flag1: '🇺🇸', flag2: '🇯🇵', code1: 'us', code2: 'jp', price: 158.92, change24h: -0.18 },
 
   // ── FOREX OTC (engine proprio) — 24/7, substitui o real fora de mercado
   { id: 'eur-usd-otc', symbol: 'EUR/USD', label: 'EUR/USD (OTC)', type: 'OTC', category: 'Moedas', payout: 85, payout5min: 85, flag1: '🇪🇺', flag2: '🇺🇸', code1: 'eu', code2: 'us', price: 1.0854, change24h: 0.12 },
@@ -58,7 +57,7 @@ export const ASSETS: Asset[] = [
 
 // Favoritos default — exibe inicialmente. EUR/USD real + USD/BRL OTC + BTC sao os
 // 3 ativos "porta de entrada" pra usuario novo.
-export const DEFAULT_FAVORITES = ['eur-usd', 'usd-brl-otc', 'btc', 'gbp-usd', 'usd-jpy', 'eth', 'eur-usd-otc']
+export const DEFAULT_FAVORITES = ['eur-usd', 'usd-brl-otc', 'btc', 'gbp-usd', 'eth', 'eur-usd-otc', 'usd-jpy-otc']
 
 export function getAssetDecimals(asset: Asset): number {
   if (asset.category === 'Cripto')           return asset.price < 1 ? 4 : 2
