@@ -693,6 +693,12 @@ function RetiradaTab() {
 
 export function ContaPage({ initialTab = 'minha-conta' }: { initialTab?: ContaTab }) {
   const [activeTab, setActiveTab] = useState<ContaTab>(initialTab)
+  // Saldo real para a barra de saldo (saque sempre opera na conta REAL).
+  const barUser = useAuthStore(s => s.user)
+  const barBalance = (() => {
+    const real = barUser?.accounts?.find(a => a.type === 'REAL')
+    return real ? parseFloat(real.balance) : 0
+  })()
 
   return (
     <div className="flex-1 flex flex-col bg-[#151822] min-h-0 overflow-hidden">
@@ -726,11 +732,11 @@ export function ContaPage({ initialTab = 'minha-conta' }: { initialTab?: ContaTa
         )}
         <div className="text-right">
           <div className="text-xs text-[#8b8f9a]">Disponível para retirada</div>
-          <div className="text-sm font-bold text-white">108.289,70 R$</div>
+          <div className="text-sm font-bold text-white">R$ {fmtBRL(barBalance)}</div>
         </div>
         <div className="text-right">
           <div className="text-xs text-[#8b8f9a]">Na conta</div>
-          <div className="text-sm font-bold text-white">108.289,70 R$</div>
+          <div className="text-sm font-bold text-white">R$ {fmtBRL(barBalance)}</div>
         </div>
       </div>
 
