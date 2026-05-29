@@ -36,6 +36,14 @@ const CRYPTO_ASSETS: AssetEntry[] = [
   { assetId: 'bnb', symbol: 'BNBUSDT' },
 ]
 
+// Forex real: SOMENTE o publisher chama o Twelve Data. O gráfico lê da
+// live_prices (centralizado) -> nenhum navegador consome cota. 2 pares a cada
+// 30s = 4 req/min, folga sob o limite Basic 8 (8/min).
+const FOREX_ASSETS: AssetEntry[] = [
+  { assetId: 'eur-usd', symbol: 'EUR/USD' },
+  { assetId: 'gbp-usd', symbol: 'GBP/USD' },
+]
+
 type PriceRow = { assetId: string; symbol: string; price: number; source: string }
 
 // Upsert batch via Prisma raw. assetId/symbol/source sao constantes do servidor
@@ -92,17 +100,49 @@ async function publishCrypto() {
   return upsert(rows)
 }
 
+async function fetchTwelveData(symbol: string): Promise<number> {
+  const apiKey = process.env.TWELVE_DATA_API_KEY
+  if (!apiKey) throw new Error('TWELVE_DATA_API_KEY ausente')
+  const res = await fetch(`https://api.twelvedata.com/price?symbol=${encodeURIComponent(symbol)}&apikey=${apiKey}`, {
+    signal: AbortSignal.timeout(5_000),
+  })
+  const json = (await res.json()) as { price?: string; status?: string; message?: string }
+  if (json.status === 'error') throw new Error(`twelvedata ${symbol}: ${json.message}`)
+  const price = parseFloat(json.price ?? '')
+  if (!price || isNaN(price)) throw new Error(`twelvedata ${symbol}: preco invalido`)
+  return price
+}
+
+// Forex: Twelve Data a cada 30s (4 req/min, sob o limite). Centralizado: so aqui.
+async function publishForex() {
+  const rows: PriceRow[] = []
+  await Promise.all(
+    FOREX_ASSETS.map(async a => {
+      try { rows.push({ assetId: a.assetId, symbol: a.symbol, price: await fetchTwelveData(a.symbol), source: 'twelvedata' }) }
+      catch (e: any) { console.error('[live-prices]', e.message) }
+    }),
+  )
+  return upsert(rows)
+}
+
 let otcTimer: NodeJS.Timeout | null = null
 let cryptoTimer: NodeJS.Timeout | null = null
+let forexTimer: NodeJS.Timeout | null = null
 
 export function startLivePricePublisher() {
-  // OTC: 2s (memoria, barato). Cripto: 10s.
+  // OTC: 2s (memoria, barato). Cripto: 10s. Forex: 30s (cota Twelve Data).
   otcTimer    = setInterval(() => { publishOtc().catch(e => console.error('[live-prices] otc:', e.message)) }, 2_000)
   cryptoTimer = setInterval(() => { publishCrypto().catch(e => console.error('[live-prices] crypto:', e.message)) }, 10_000)
+  forexTimer  = setInterval(() => { publishForex().catch(e => console.error('[live-prices] forex:', e.message)) }, 30_000)
   publishCrypto().catch(() => {})  // primeiro publish imediato
-  console.log('[live-prices] publisher iniciado via Prisma (OTC 2s, cripto 10s)')
+  publishForex().catch(() => {})
+  console.log('[live-prices] publisher iniciado via Prisma (OTC 2s, cripto 10s, forex 30s)')
 
-  const stop = () => { if (otcTimer) clearInterval(otcTimer); if (cryptoTimer) clearInterval(cryptoTimer) }
+  const stop = () => {
+    if (otcTimer) clearInterval(otcTimer)
+    if (cryptoTimer) clearInterval(cryptoTimer)
+    if (forexTimer) clearInterval(forexTimer)
+  }
   process.once('SIGTERM', stop)
   process.once('SIGINT', stop)
 }
