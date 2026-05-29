@@ -2,6 +2,7 @@ import 'dotenv/config'
 import { buildApp } from './app.js'
 import { startOtcEngine } from './market-data/otc/engine.js'
 import { initOtcHub } from './market-data/otc/ws-hub.js'
+import { startLivePricePublisher } from './market-data/livePricePublisher.js'
 import { startOrphanSweeper } from './operations/service.js'
 
 const PORT = parseInt(process.env.PORT ?? '3001', 10)
@@ -20,6 +21,10 @@ async function start() {
     } else {
       console.log('[otc-engine] disabled via OTC_ENGINE_ENABLED=false')
     }
+
+    // Publica precos autoritativos (OTC + cripto + forex) em live_prices.
+    // Roda apos o engine pra ja ter precos OTC em memoria.
+    startLivePricePublisher()
 
     // Liquida operacoes que ficaram OPEN com expires_at no passado.
     // Necessario porque setTimeout em memoria eh perdido em restart de container.
